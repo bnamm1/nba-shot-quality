@@ -1,1 +1,1 @@
-# nba-shot-quality-
+# nba-shot-quality
