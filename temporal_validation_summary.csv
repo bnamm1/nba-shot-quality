@@ -1,0 +1,2 @@
+validation_type,train_season,test_season,train_size,test_size,best_model,best_auc,best_accuracy,best_log_loss
+Temporal (2023→2024),2022-23,2024-25,218702,219528,catboost,0.9593457344518119,0.9118836777085383,0.2428167435679877
