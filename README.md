@@ -224,4 +224,4 @@ This project is for research and educational purposes.
 ## Acknowledgments
 
 - NBA Stats API for play-by-play data
-- Pythagorean winning formula (exponent 16.5) for expected wins calculation
+- Pythagorean winning formula (exponent 14) for expected wins calculation

@@ -15,7 +15,7 @@ This repository contains a sports analytics research project that analyzes shot 
 1. **Data Enrichment** ([enrich_shots_nbastatsv3_full.ipynb](enrich_shots_nbastatsv3_full.ipynb)): Takes raw NBA play-by-play data and enriches shots with approximate shot clock and contest classification
 2. **Modeling & Analysis** ([NBA_Shot_Quality_Modeling_XGB_CatBoost.ipynb](NBA_Shot_Quality_Modeling_XGB_CatBoost.ipynb)): Trains ML models (Logistic Regression, kNN, Random Forest, Gradient Boosting, MLP, CatBoost, XGBoost) to predict shot outcomes, calculates expected points, and generates Pythagorean win projections
 3. **Visualization** ([NBA_Shot_Data_Exploration_2024_25_FULL.ipynb](NBA_Shot_Data_Exploration_2024_25_FULL.ipynb)): Creates comprehensive visualizations of shot data including court charts, player/team metrics, and efficiency analysis
-4. **Statistical Testing**: Uses Pythagorean winning formula with exponent 16.5 to calculate expected wins and compare to actual results
+4. **Statistical Testing**: Uses Pythagorean winning formula with exponent 14 to calculate expected wins and compare to actual results
 
 ### Target Publication
 Primary target: **Wharton Sports Analytics Journal**
@@ -82,7 +82,7 @@ A hybrid rule-based system that scores shots using:
   10. Score all shots with `p_make` probability
   11. Calculate expected points: `p_make * shotValue`
   12. Aggregate to team-game level for actual vs expected points/allowed
-  13. Compute Pythagorean expected wins using exponent=16.5: `W% = PF^16.5 / (PF^16.5 + PA^16.5)`
+  13. Compute Pythagorean expected wins using exponent=14: `W% = PF^14 / (PF^14 + PA^14)`
   14. Export: `model_results.csv`, `team_game_points.csv`, `season_standings.csv`
 - **Output Files**:
   - `model_results.csv`: Cross-validation and test metrics for all 7 models
@@ -143,7 +143,7 @@ A hybrid rule-based system that scores shots using:
 4. **Train models & compute standings**:
    - Open [NBA_Shot_Quality_Modeling_XGB_CatBoost.ipynb](NBA_Shot_Quality_Modeling_XGB_CatBoost.ipynb)
    - Update `DATA_PATH` (default: `"enriched_data/nbastatsv3_2024_enriched_shots.csv"`)
-   - Update `PYTH_EXP` if needed (default: 16.5 for Pythagorean exponent)
+   - Update `PYTH_EXP` if needed (default: 14 for Pythagorean exponent)
    - Run all cells
    - Expected training time: ~5-10 minutes for all 7 models
    - Outputs: `model_results.csv`, `team_game_points.csv`, `season_standings.csv`
