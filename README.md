@@ -1,120 +1,227 @@
-## ⏱️ Approximate Shot Clock (`SHOT_CLOCK_APPROX`)
+# NBA Shot Quality Model
 
-### What it is
+A machine learning project exploring the connections between **shot quality**, **luck**, and **winning** in the NBA.
 
-The **shot clock** is the 24-second timer (14 seconds on offensive rebounds) that governs how long a team has to attempt a shot. The official NBA public dataset (`nbastatsv3_2024.csv`) doesn’t include the actual shot clock value at the time of a shot.
+## Research Goals
 
-So we **approximate** it by reconstructing possessions from play-by-play events:
+- How does shot quality correlate with scoring and winning?
+- Which teams are getting "lucky" or "unlucky" based on expected vs actual performance?
+- Can we better measure a team's true "skill" using expected points and Pythagorean winning percentage?
+
+**Target Publication**: Wharton Sports Analytics Journal
+
+---
+
+## Model Performance
+
+| Model | Test AUC | Description |
+|-------|----------|-------------|
+| **LightGBM** | 0.667 | Best single model (Bayesian-optimized) |
+| Voting Ensemble | 0.665 | Combines top 5 models |
+| XGBoost | 0.664 | Second-best gradient boosting |
+| CatBoost | 0.663 | Handles categoricals natively |
+
+### Feature Importance Insights
+
+**Top-tier features** (shot location + player history):
+- Court position (`xLegacy`, `yLegacy`) dominates
+- Player skill (`prior_fg_pct`) is top-5 predictor
+- Prior attempts indicate high-volume shooter patterns
+
+**Key finding**: Prior season features add significant predictive power - 6 of the top 20 features are `prior_*` or `opp_def_*` historical stats.
+
+---
+
+## Features (62 total)
+
+### Base Features (from enriched data)
+| Feature | Description |
+|---------|-------------|
+| `shotDistance` | Distance from basket in feet (0-47 ft) |
+| `SHOT_CLOCK_APPROX` | Approximate shot clock when shot taken (0-24 sec) |
+| `xLegacy`, `yLegacy` | Court coordinates (tenths of feet) |
+| `contest_score` | Heuristic difficulty score (-2 to +4) |
+| `shotValue` | Point value (2 or 3) |
+
+### Prior Season Features (11 features)
+Player historical stats and opponent defensive ratings from the **previous season** to avoid data leakage:
+
+| Feature | Description |
+|---------|-------------|
+| `prior_fg_pct` | Player's FG% from prior season |
+| `prior_fg3_pct` | Player's 3PT% from prior season |
+| `prior_fg2_pct` | Player's 2PT% from prior season |
+| `prior_attempts` | Total shot attempts in prior season |
+| `opp_def_fg_pct` | Opponent's overall FG% allowed |
+| `opp_def_rim_pct` | Opponent's rim FG% allowed |
+| `opp_def_3pt_pct` | Opponent's 3PT% allowed |
+
+### Engineered Features
+- **Shot Location**: `is_paint`, `is_midrange`, `is_corner3`, `is_above_break3`
+- **Shot Clock Buckets**: `clock_0_4`, `clock_4_8`, ..., `clock_20_24`
+- **Interactions**: `clock_x_distance`, `clock_x_paint`, `rhythm_x_distance`
+- **Text-Parsed**: `is_pullup`, `is_stepback`, `is_fadeaway`, `is_driving`, `is_floating`
+
+---
+
+## Project Structure
+
+```
+nba-shot-quality/
+├── NBA_Shot_Quality_Modeling_XGB_CatBoost.ipynb  # Main modeling notebook
+├── NBA_Shot_Quality_Rolling_Temporal_Validation.ipynb
+├── NBA_Shot_Quality_Year_to_Year_Validation.ipynb
+├── NBA_Shot_Data_Exploration_2024_25_FULL.ipynb
+├── enrich_shots_nbastatsv3_full.ipynb            # Data enrichment pipeline
+├── raw_data/                                      # Raw NBA Stats API data
+│   └── nbastatsv3_YYYY.csv
+├── enriched_data/                                 # Processed shot data
+│   └── nbastatsv3_YYYY_enriched_shots.csv
+├── models/                                        # Cached trained models
+│   ├── fitted_models.pkl
+│   └── model_results.pkl
+├── player_historical_stats.csv                    # Player FG% by season
+├── team_defensive_stats.csv                       # Team defensive ratings
+├── model_results.csv                              # Model comparison results
+├── season_standings.csv                           # Pythagorean expected wins
+└── team_game_points.csv                           # Per-game expected points
+```
+
+---
+
+## Quick Start
+
+### 1. Install Dependencies
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install pandas numpy scikit-learn xgboost catboost lightgbm matplotlib jupyter optuna
+```
+
+### 2. Run the Pipeline
+
+**Enrich raw data:**
+```bash
+jupyter notebook enrich_shots_nbastatsv3_full.ipynb
+```
+
+**Train models:**
+```bash
+jupyter notebook NBA_Shot_Quality_Modeling_XGB_CatBoost.ipynb
+```
+
+### 3. Temporal Validation
+- `NBA_Shot_Quality_Rolling_Temporal_Validation.ipynb` - Rolling window validation
+- `NBA_Shot_Quality_Year_to_Year_Validation.ipynb` - Year-over-year generalization
+
+---
+
+## Temporal Validation Results
+
+### Rolling Temporal (Train: 2015-N, Test: N+1)
+| Fold | Train Years | Test Year | AUC |
+|------|-------------|-----------|-----|
+| 1 | 2015-2016 | 2017 | ~0.66 |
+| 2 | 2015-2017 | 2018 | ~0.66 |
+| ... | ... | ... | ... |
+| 8 | 2015-2023 | 2024 | ~0.67 |
+
+**Mean AUC**: 0.662 +/- 0.007
+
+### Year-to-Year (Train: N, Test: N+1)
+Single-year training to test year-over-year stability.
+
+**Mean AUC**: ~0.65
+
+---
+
+## Technical Details
+
+### Approximate Shot Clock (`SHOT_CLOCK_APPROX`)
+
+The official NBA public dataset doesn't include the actual shot clock value. We **approximate** it by reconstructing possessions from play-by-play events:
 
 1. **Reset events (new shot clock):**
-
    * **Made field goal** → opposing team inbounds, new 24s
    * **Turnover** → opposing team gains possession, new 24s
-   * **Jump ball** → team that wins possession starts with 24s
    * **Defensive rebound** → new 24s
-   * **Offensive rebound** → 14s reset (since 2018–19 rules)
-   * **Defensive violations** (kicked ball, defensive 3-second, defensive goaltending) → 14s reset to offense
-   * **Final free throws** (1 of 1, 2 of 2, 3 of 3, Technical/Flagrant/Clear Path last FT) → change of possession, new 24s
+   * **Offensive rebound** → 14s reset (since 2018-19 rules)
+   * **Defensive violations** (kicked ball, defensive 3-second) → 14s reset
 
 2. **Elapsed time since reset:**
-
-   * We convert the `clock` field (`PT11M43.00S`) and `period` into **absolute game seconds**.
-   * For each shot, we find the **last reset event in that period** and compute the difference in time.
-   * This difference = **elapsed seconds since possession reset**.
+   * Convert `clock` field (`PT11M43.00S`) into absolute game seconds
+   * For each shot, find the last reset event and compute time difference
 
 3. **Shot clock approximation:**
+   * `SHOT_CLOCK_APPROX = reset_value - time_since_reset`
+   * Example: Reset at 8:00, shot at 7:50 → `24 - 10 = 14`
 
-   * `SHOT_CLOCK_APPROX = min(reset_value, time_since_reset)`
-   * Where `reset_value` = 24 or 14 depending on event.
-   * Example: If last reset was at 8:00 in the quarter, and the shot was at 7:50, then `time_since_reset = 10`, and the approximate shot clock is `24 – 10 = 14`.
-
-⚠️ **Limitations:**
-
-* Doesn’t model “minimum 14” exactly (e.g., when 18 seconds remain and a defensive kick-ball resets to 14, NBA rule keeps 18). We approximate as a hard reset to 14.
-* Doesn’t track inbound delays or retained possession after technical/flagrant FTs.
-* Still, it’s a solid proxy for distinguishing **early-clock shots (20+)** vs. **late-clock shots (≤5)**.
+**Limitations:**
+- Doesn't model "minimum 14" exactly (keeps 18 when >14 remains)
+- Doesn't track inbound delays
+- Still effective for distinguishing early-clock (20+) vs late-clock (<=5) shots
 
 ---
 
-## 🏀 Contested/Open Heuristic (`contest_score`, `contest_label`, `contest_reasons`)
+### Contested/Open Heuristic (`contest_score`, `contest_label`)
 
-Since defender distance (`CLOSE_DEF_DIST`) isn’t in this dataset, we use **play-by-play text, action type, sub type, shot attributes, and coordinates** to *estimate* whether a shot was contested.
-
-### How it works
+Since defender distance isn't in this dataset, we estimate shot difficulty using:
 
 1. **Action Type / SubType / Description**
-
-   * **Contested-like** (+2): Pull-Up, Step Back, Fadeaway, Driving Layup, Driving Floating, Hook, Dunk, Putback, Alley-Oop, Reverse, Turnaround, etc.
-   * **Open-like** (–1): Catch-and-Shoot, Spot Up, Generic Jump Shot, Regular.
-   * **Description text** is also parsed to catch “step back”, “fadeaway”, “catch-and-shoot” even when subType is `Unknown`.
+   * **Contested-like** (+2): Pull-Up, Step Back, Fadeaway, Driving Layup, Hook, Dunk
+   * **Open-like** (-1): Catch-and-Shoot, Spot Up, Generic Jump Shot
 
 2. **Shot Location / Distance**
+   * **At-rim (<=5 ft)** (+1) → usually more defended
+   * **Mid-range (8-16 ft)** (+1) → often tightly contested
+   * **Deep 3s (>=27 ft)** (-1) → more likely open
 
-   * **At-rim / very close (≤5 ft)** (+1) → usually more defended.
-   * **Mid-range (8–16 ft)** (+1) → often tightly contested.
-   * **Deep above-the-break 3s (≥27 ft)** (–1) → more likely to be open.
-
-3. **Corner vs Above-the-Break** (using NBA x/y coordinates, tenths of feet)
-
-   * Corner-3 defined as **`|x| ≥ 220` and `y ≤ 50`**.
-   * Corner catch-and-shoot or spot-up looks are nudged more open (–1).
+3. **Corner vs Above-the-Break**
+   * Corner-3: `|xLegacy| >= 220` and `yLegacy <= 50`
+   * Corner catch-and-shoot nudged more open (-1)
 
 4. **Shot Clock Context**
+   * `SHOT_CLOCK_APPROX <= 5` (+1): Late-clock = rushed/contested
 
-   * If `SHOT_CLOCK_APPROX ≤ 5` (+1): End-of-clock situations usually force **heavily contested or rushed** shots.
-
-5. **Scoring System (`contest_score`):**
-
-   * Start at 0
-   * Add/subtract points from rules above
-   * Examples:
-
-     * Driving layup with 2 seconds left → +2 (driving) +1 (close range) +1 (late clock) = **+4**
-     * Catch-and-shoot 28′ above-the-break three with 14 seconds left → –1 (catch-and-shoot) –1 (deep 3) = **–2**
-
-6. **Labels (`contest_label`):**
-
-   * `≥ 2` → **likely\_contested**
+5. **Labels:**
+   * `>= 2` → **likely_contested**
    * `= 1` → **borderline**
-   * `≤ 0` → **likely\_open**
-
-7. **Reasons (`contest_reasons`):**
-
-   * Text log of why the shot got its score.
-   * Example: `"subType: contested-like, distance: at-rim/very close, clock: late (<=5s)"`
+   * `<= 0` → **likely_open**
 
 ---
 
-## 🔎 Example from Jayson Tatum (gameId 22400001)
+### Court Coordinates (xLegacy / yLegacy)
 
-| Description                  | Shot Clock Approx | Contest Score | Contest Label     | Contest Reasons                                              |
-| ---------------------------- | ----------------- | ------------- | ----------------- | ------------------------------------------------------------ |
-| MISS 29′ Pullup 3            | 12                | +1            | borderline        | subType: contested-like, text: catch/spot                    |
-| Driving Reverse Layup (made) | 0                 | +3            | likely\_contested | subType: contested-like, distance: at-rim/very close, clock… |
-| Catch-and-shoot 27′ 3 (made) | 0                 | –1            | likely\_open      | subType: open-like, coords: corner-3, corner: catch/spot, …  |
-
----
-
-✅ So in summary:
-
-* **Approximate Shot Clock** = estimate of how much time was left on the shot clock when the shot was taken, reconstructed from possession resets (FGs, rebounds, TOs, FTs, violations).
-* **Contested/Open Heuristic** = hybrid rule-based system that classifies shots into **likely\_open**, **borderline**, or **likely\_contested**, using **action type, subType, description text, shot distance, coordinates, and shot clock pressure**.
-
-
-## 🏀 Court Coordinates & Zones (xLegacy / yLegacy)
-
-Our play-by-play uses **NBA shot coordinates in tenths of feet**:
-
-- **xLegacy**: –250 to +250 (sideline ↔ sideline)  
-- **yLegacy**: 0 to 470 (baseline → half-court)  
+NBA shot coordinates in **tenths of feet**:
+- **xLegacy**: -250 to +250 (sideline to sideline)
+- **yLegacy**: 0 to 470 (baseline to half-court)
 - **Basket**: (0, 0)
 
-**Corner-3 rule used in the heuristic**: `|xLegacy| ≥ 220` **and** `yLegacy ≤ 50`  
-All other 3PT shots are treated as **above-the-break**.
+**Zones:**
+- **Paint**: ~0-8 ft from basket
+- **Mid-range**: 8-22 ft
+- **Corner-3**: `|x| >= 220` and `y <= 50`
+- **Above-the-break 3**: All other 3PT shots
 
-### Zones referenced by the heuristic
+---
 
-- **Paint (Key)**: roughly inside the lane (~0–15 ft) — typically tighter defense  
-- **Mid-range**: ~8–16 ft annulus — often contested  
-- **Corner-3 zone**: `|x|≥220 & y≤50` — catch-and-shoot here is often more open  
-- **Above-the-break 3**: all other 3PTs; very deep (≥27 ft) are treated as more open
+## Output Files
+
+| File | Description |
+|------|-------------|
+| `model_results.csv` | Cross-validation and test metrics for all models |
+| `team_game_points.csv` | Per-game actual vs expected points by team |
+| `season_standings.csv` | Pythagorean expected wins vs actual wins |
+| `player_historical_stats.csv` | Player FG%, 3P%, attempts by season |
+| `team_defensive_stats.csv` | Opponent FG% allowed by zone and season |
+
+---
+
+## License
+
+This project is for research and educational purposes.
+
+## Acknowledgments
+
+- NBA Stats API for play-by-play data
+- Pythagorean winning formula (exponent 16.5) for expected wins calculation
