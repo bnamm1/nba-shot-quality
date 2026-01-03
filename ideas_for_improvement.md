@@ -1,43 +1,48 @@
-Ideas for Improvement
-1. Prior Season Player Stats (No Leakage)
-This is the biggest opportunity. Use 2023-24 season FG% to predict 2024-25 shots:
+Current Ceiling Analysis
+The theoretical ceiling for shot prediction is probably ~72-75% AUC because:
+Even perfect information can't predict random variation (shooter's touch that day)
+NBA players are skilled - good shooters make tough shots, bad shooters miss open ones
+High-Impact Ideas (Likely to Help)
+1. Assisted vs Unassisted Shots
+Parse play-by-play to identify if shot was assisted. Assisted shots are typically higher quality.
 
-- Load 2023-24 enriched data
-- Calculate each player's FG%, 3P%, 2P% from that season
-- Merge into 2024-25 data by personId
-- New players get league average
-This is legitimate because it's truly historical data.
-2. Shot Sequencing Features
-From the play-by-play ordering within games:
-Time since player's last shot attempt (fatigue/rhythm)
-Player's shot count so far this game (workload)
-Team's recent makes/misses (momentum proxy)
-Shots since last timeout
-3. Better Spatial Features
-Paint zones: Restricted area (0-4ft) vs paint (4-10ft)
-Mid-range zones: Elbow, baseline, free-throw line extended
-3PT zones: Corner vs wing vs top of key (more granular than current)
-Distance from nearest corner (corner 3s are higher %)
-4. Shot Type Mining from description
-Parse the description field for patterns (without using make/miss words):
-"catch and shoot" → high FG%
-"step back" → lower FG%
-"driving" → contested
-"turnaround" → difficult
-"dunk" vs "layup" vs "floater"
-5. Opponent Features
-Opponent team's defensive rating (from prior season or external source)
-Opponent's rim protection stats
-Opponent's perimeter defense stats
-6. Shot Clock × Location Interactions
-Early clock + paint = transition/fast break (high FG%)
-Late clock + deep 3 = desperation (low FG%)
-More granular bucketing
-7. Home Court Advantage Refinement
-Specific arena effects (altitude in Denver, etc.)
-Travel distance for away team
-8. Model Improvements
-Stacking/Blending: Use predictions from multiple models as features
-Calibration: Platt scaling or isotonic regression
-Bayesian optimization: Instead of random search
-Which of these would you like to explore first? The prior season player stats (#1) would likely give the biggest boost since player skill is a huge factor we're currently missing.
+# Could parse from description or look at next event
+df['is_assisted'] = desc_lower.str.contains('assist').astype(int)
+2. In-Game Shooter Momentum (Hot Hand)
+Rolling average of player's last N shots in the game. Research shows hot hand is real but small.
+
+# Careful with leakage - only use PRIOR shots
+df['player_game_fg_pct_prior'] = df.groupby(['gameId', 'personId'])['shotResult'].transform(
+    lambda x: x.shift().expanding().mean()
+)
+3. Team Pace Factor
+Fast-paced teams create more transition opportunities (higher FG%). Use prior season pace.
+4. Rest Days / Back-to-Back
+Players shoot worse on back-to-backs. Could add days_rest feature from schedule.
+5. Quarter-End Heaves
+Separate feature for end-of-quarter situations (different from just late shot clock).
+
+df['is_quarter_end'] = (df['period_sec_remaining'] <= 3).astype(int)
+6. Shot Sequence / Offensive Rebound
+Is this a putback after offensive rebound? Second-chance points have different FG%.
+Medium-Impact Ideas
+7. Better Contest Estimation
+Use defender positions if available from tracking data
+Parse "contested" from description more carefully
+8. Player Archetype
+Cluster players by shooting style (spot-up shooter, slasher, post player) and use as feature.
+9. Matchup History
+How does this shooter perform against this specific team historically?
+10. Time of Season
+Early season (rust), mid-season (rhythm), late season (fatigue), playoffs (intensity).
+Model Architecture Ideas
+11. Stacking/Ensemble
+Combine predictions from multiple models (LR, RF, XGB, CatBoost) via meta-learner.
+12. Feature Selection
+Remove noisy features. Use SHAP or permutation importance to identify low-value features.
+13. Calibration
+Use Platt scaling or isotonic regression to improve probability calibration.
+Which of these would you like to pursue? I'd recommend:
+Assisted shots - Easy to implement, clear signal
+Quarter-end heaves - Easy, should help separate true desperation shots
+Stacking ensemble - Can squeeze out extra 0.5-1% AUC
