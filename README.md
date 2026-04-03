@@ -12,27 +12,84 @@ A machine learning project exploring the connections between **shot quality**, *
 
 ---
 
+## Data Description
+
+**Source**: [shufinskiy/nba_data](https://github.com/shufinskiy/nba_data/tree/main/datasets) (play-by-play from NBA Stats API v3)
+
+**Raw Data** (`raw_data/nbastatsv3_YYYY.csv`):
+- **Rows**: ~7.05 million total across 12 season files (~550k–607k per season)
+- **Features**: 24 columns
+- **Time range**: 2013-14 through 2024-25 (12 seasons)
+- **Key fields**: `gameId`, `personId`, `teamTricode`, `clock`, `period`, `xLegacy`, `yLegacy`, `shotDistance`, `shotResult`, `shotValue`, `actionType`, `subType`, `description`, `location`
+
+**Enriched Data** (`enriched_data/nbastatsv3_YYYY_enriched_shots.csv`):
+- **Rows**: ~2.51 million total (field goal attempts only); ~219k per season
+- **Features**: 30 columns (24 original + 6 engineered)
+- **Engineered columns**: `ABS_TIME`, `SHOT_CLOCK_APPROX`, `SHOT_CLOCK_SOURCE`, `contest_score`, `contest_label`, `contest_reasons`
+
+---
+
 ## Model Performance
 
+### Models (12 + voting ensemble)
+| Category | Models |
+|----------|--------|
+| **Boosting (Optuna-tuned)** | LightGBM, HistGradientBoosting, GradientBoosting, XGBoost, CatBoost |
+| **Ensemble** | RandomForest, ExtraTrees, AdaBoost |
+| **Other** | LogisticRegression, MLP, GaussianNB, KNN |
+| **Meta** | VotingEnsemble (soft voting over top 5 boosters) |
+
+### Best Results (2024-25 season)
 | Model | Test AUC | Description |
 |-------|----------|-------------|
 | **LightGBM** | 0.667 | Best single model (Bayesian-optimized) |
-| Voting Ensemble | 0.665 | Combines top 5 models |
-| XGBoost | 0.664 | Second-best gradient boosting |
-| CatBoost | 0.663 | Handles categoricals natively |
+| Voting Ensemble | 0.667 | Soft voting over top 5 |
+| XGBoost | 0.667 | |
+| Gradient Boosting | 0.666 | |
+| CatBoost | 0.666 | |
+
+### Configuration
+- `N_OPTUNA_TRIALS = 10` (Bayesian hyperparameter optimization via Optuna TPE)
+- `PYTH_EXP = 14` (Pythagorean win formula exponent)
+- `RANDOM_STATE = 42`
+- Cross-validation: 3-fold stratified, results reported as mean ± std
+
+### Model Details
+
+**Baseline models** (static hyperparameters):
+| Model | Key Hyperparameters |
+|-------|-------------------|
+| Logistic Regression | `solver="saga", max_iter=2000, C=0.5` |
+| kNN | `n_neighbors=15, weights='distance'` |
+| Random Forest | `n_estimators=500, max_depth=12, min_samples_leaf=5` |
+| Gradient Boosting | `n_estimators=300, max_depth=5, learning_rate=0.1` |
+| MLP | `hidden_layer_sizes=(128,64), max_iter=500, early_stopping=True` |
+| Extra Trees | `n_estimators=500, max_depth=12, min_samples_leaf=5` |
+| AdaBoost | `n_estimators=200, learning_rate=0.1` |
+| Naive Bayes | Default (no tuning) |
+| HistGradientBoosting | `max_iter=500, max_depth=8, learning_rate=0.05` |
+
+**Optuna-tuned models** (Bayesian optimization, 10 trials, TPE sampler):
+| Model | Tuned Hyperparameters |
+|-------|----------------------|
+| XGBoost | `n_estimators`, `max_depth`, `learning_rate`, `subsample`, `colsample_bytree`, `reg_alpha`, `reg_lambda`, `min_child_weight` |
+| CatBoost | `iterations`, `depth`, `learning_rate`, `l2_leaf_reg`, `bagging_temperature`, `random_strength` |
+| LightGBM | `n_estimators`, `max_depth`, `learning_rate`, `num_leaves`, `subsample`, `colsample_bytree`, `reg_alpha`, `reg_lambda`, `min_child_samples` |
+| Gradient Boosting | `n_estimators`, `max_depth`, `learning_rate`, `subsample`, `min_samples_split`, `min_samples_leaf` |
+| HistGradientBoosting | `max_iter`, `max_depth`, `learning_rate`, `max_leaf_nodes`, `min_samples_leaf`, `l2_regularization` |
 
 ### Feature Importance Insights
 
 **Top-tier features** (shot location + player history):
 - Court position (`xLegacy`, `yLegacy`) dominates
-- Player skill (`prior_fg_pct`) is top-5 predictor
+- Player skill (`prior_fg_pct`) is a top-5 predictor
 - Prior attempts indicate high-volume shooter patterns
 
-**Key finding**: Prior season features add significant predictive power - 6 of the top 20 features are `prior_*` or `opp_def_*` historical stats.
+**Key finding**: Prior season features add significant predictive power — 6 of the top 20 features are `prior_*` or `opp_def_*` historical stats.
 
 ---
 
-## Features (62 total)
+## Features
 
 ### Base Features (from enriched data)
 | Feature | Description |
@@ -60,7 +117,47 @@ Player historical stats and opponent defensive ratings from the **previous seaso
 - **Shot Location**: `is_paint`, `is_midrange`, `is_corner3`, `is_above_break3`
 - **Shot Clock Buckets**: `clock_0_4`, `clock_4_8`, ..., `clock_20_24`
 - **Interactions**: `clock_x_distance`, `clock_x_paint`, `rhythm_x_distance`
-- **Text-Parsed**: `is_pullup`, `is_stepback`, `is_fadeaway`, `is_driving`, `is_floating`
+- **Text-Parsed**: `is_pullup`, `is_stepback`, `is_fadeaway`, `is_driving`, `is_floating`, `is_cutting`, `is_tip`, `is_putback`, `is_second_chance`
+
+---
+
+## Temporal Validation
+
+### Rolling Temporal (Train: 2014-N, Test: N+1)
+
+Expanding window: train on all prior seasons, test on the next unseen season.
+
+| Fold | Train Years | Test Year | AUC |
+|------|-------------|-----------|-----|
+| 1 | 2014-2016 | 2017 | ~0.66 |
+| 2 | 2014-2017 | 2018 | ~0.66 |
+| ... | ... | ... | ... |
+| 8 | 2014-2023 | 2024 | ~0.67 |
+
+**Mean AUC**: 0.662 ± 0.007
+
+### Year-to-Year (Train: N, Test: N+1)
+
+Single-season training to test year-over-year stability.
+
+| Fold | Train | Test | AUC |
+|------|-------|------|-----|
+| 1 | 2020 | 2021 | ~0.65 |
+| 2 | 2021 | 2022 | ~0.65 |
+| ... | ... | ... | ... |
+| 5 | 2024 | 2025 | ~0.65 |
+
+**Mean AUC**: ~0.65
+
+---
+
+## Open Shots vs Wins Analysis
+
+Comparison of estimated open shots (from our model's `contest_label`) vs actual open shots (from NBA.com closest defender data, 4+ feet) against 2024-25 season wins.
+
+**NBA.com data**: Combined 4-6 ft (Open) + 6+ ft (Wide Open) closest defender distance.
+
+See `Open_Shots_vs_Wins_Analysis.ipynb` for charts and correlation analysis.
 
 ---
 
@@ -68,23 +165,24 @@ Player historical stats and opponent defensive ratings from the **previous seaso
 
 ```
 nba-shot-quality/
-├── NBA_Shot_Quality_Modeling_XGB_CatBoost.ipynb  # Main modeling notebook
-├── NBA_Shot_Quality_Rolling_Temporal_Validation.ipynb
-├── NBA_Shot_Quality_Year_to_Year_Validation.ipynb
-├── NBA_Shot_Data_Exploration_2024_25_FULL.ipynb
-├── enrich_shots_nbastatsv3_full.ipynb            # Data enrichment pipeline
-├── raw_data/                                      # Raw NBA Stats API data
-│   └── nbastatsv3_YYYY.csv
-├── enriched_data/                                 # Processed shot data
-│   └── nbastatsv3_YYYY_enriched_shots.csv
-├── models/                                        # Cached trained models
+├── NBA_Shot_Quality_Modeling_XGB_CatBoost.ipynb       # Main modeling notebook
+├── NBA_Shot_Quality_Rolling_Temporal_Validation.ipynb  # Expanding window validation
+├── NBA_Shot_Quality_Year_to_Year_Validation.ipynb      # Year-over-year validation
+├── NBA_Shot_Data_Exploration_2024_25_FULL.ipynb        # Visualization suite
+├── Open_Shots_vs_Wins_Analysis.ipynb                   # Open shots vs wins charts
+├── enrich_shots_nbastatsv3_full.ipynb                  # Data enrichment pipeline
+├── raw_data/                                           # Raw NBA Stats API data
+│   └── nbastatsv3_YYYY.csv                            #   (12 seasons, 2013-2024)
+├── enriched_data/                                      # Processed shot data
+│   └── nbastatsv3_YYYY_enriched_shots.csv             #   (~219k shots per season)
+├── models/                                             # Cached trained models
 │   ├── fitted_models.pkl
 │   └── model_results.pkl
-├── player_historical_stats.csv                    # Player FG% by season
-├── team_defensive_stats.csv                       # Team defensive ratings
-├── model_results.csv                              # Model comparison results
-├── season_standings.csv                           # Pythagorean expected wins
-└── team_game_points.csv                           # Per-game expected points
+├── player_historical_stats.csv                         # Player FG% by season
+├── team_defensive_stats.csv                            # Team defensive ratings
+├── model_results.csv                                   # Model comparison results
+├── season_standings.csv                                # Pythagorean expected wins
+└── team_game_points.csv                                # Per-game expected points
 ```
 
 ---
@@ -111,27 +209,8 @@ jupyter notebook NBA_Shot_Quality_Modeling_XGB_CatBoost.ipynb
 ```
 
 ### 3. Temporal Validation
-- `NBA_Shot_Quality_Rolling_Temporal_Validation.ipynb` - Rolling window validation
-- `NBA_Shot_Quality_Year_to_Year_Validation.ipynb` - Year-over-year generalization
-
----
-
-## Temporal Validation Results
-
-### Rolling Temporal (Train: 2015-N, Test: N+1)
-| Fold | Train Years | Test Year | AUC |
-|------|-------------|-----------|-----|
-| 1 | 2015-2016 | 2017 | ~0.66 |
-| 2 | 2015-2017 | 2018 | ~0.66 |
-| ... | ... | ... | ... |
-| 8 | 2015-2023 | 2024 | ~0.67 |
-
-**Mean AUC**: 0.662 +/- 0.007
-
-### Year-to-Year (Train: N, Test: N+1)
-Single-year training to test year-over-year stability.
-
-**Mean AUC**: ~0.65
+- `NBA_Shot_Quality_Rolling_Temporal_Validation.ipynb` — Rolling window validation
+- `NBA_Shot_Quality_Year_to_Year_Validation.ipynb` — Year-over-year generalization
 
 ---
 
@@ -209,7 +288,7 @@ NBA shot coordinates in **tenths of feet**:
 
 | File | Description |
 |------|-------------|
-| `model_results.csv` | Cross-validation and test metrics for all models |
+| `model_results.csv` | Cross-validation (mean ± std) and test metrics for all models |
 | `team_game_points.csv` | Per-game actual vs expected points by team |
 | `season_standings.csv` | Pythagorean expected wins vs actual wins |
 | `player_historical_stats.csv` | Player FG%, 3P%, attempts by season |
@@ -223,5 +302,6 @@ This project is for research and educational purposes.
 
 ## Acknowledgments
 
-- NBA Stats API for play-by-play data
+- [shufinskiy/nba_data](https://github.com/shufinskiy/nba_data) for NBA Stats API play-by-play data
+- NBA Stats API for closest defender distance data
 - Pythagorean winning formula (exponent 14) for expected wins calculation
