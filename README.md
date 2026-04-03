@@ -161,6 +161,43 @@ See `Open_Shots_vs_Wins_Analysis.ipynb` for charts and correlation analysis.
 
 ---
 
+## Notebooks
+
+### Primary Workflows
+
+| Notebook | Description |
+|----------|-------------|
+| **[NBA_Shot_Quality_Modeling_XGB_CatBoost.ipynb](NBA_Shot_Quality_Modeling_XGB_CatBoost.ipynb)** | Main modeling pipeline. Trains 12 ML models with Bayesian optimization, scores all shots with make probability, computes expected points, and generates Pythagorean win projections. |
+| **[enrich_shots_nbastatsv3_full.ipynb](enrich_shots_nbastatsv3_full.ipynb)** | Data enrichment pipeline. Takes raw play-by-play data and adds approximate shot clock (reconstructed from possession resets) and contest classification (open/borderline/contested heuristic). |
+| **[NBA_Shot_Data_Exploration_2024_25_FULL.ipynb](NBA_Shot_Data_Exploration_2024_25_FULL.ipynb)** | Comprehensive visualization suite. Generates 12 charts including court shot charts, hexbin eFG% maps, FG% heatmaps by distance × shot clock, team shot profiles, and player efficiency analysis. |
+
+### Validation
+
+| Notebook | Description |
+|----------|-------------|
+| **[NBA_Shot_Quality_Rolling_Temporal_Validation.ipynb](NBA_Shot_Quality_Rolling_Temporal_Validation.ipynb)** | Rolling temporal validation. Trains on expanding windows of prior seasons (e.g., 2014-2018 → test 2019) across 8 folds to evaluate model generalization over time. |
+| **[NBA_Shot_Quality_Year_to_Year_Validation.ipynb](NBA_Shot_Quality_Year_to_Year_Validation.ipynb)** | Year-to-year validation. Trains on a single season and tests on the next (e.g., 2023 → 2024) across 5 folds to measure year-over-year stability. |
+| **[NBA_Shot_Quality_Temporal_Validation_2023_2024.ipynb](NBA_Shot_Quality_Temporal_Validation_2023_2024.ipynb)** | Focused temporal validation. Trains on 2023 season and tests on 2024 to measure true out-of-sample generalization. |
+
+### Analysis
+
+| Notebook | Description |
+|----------|-------------|
+| **[Open_Shots_vs_Wins_Analysis.ipynb](Open_Shots_vs_Wins_Analysis.ipynb)** | Open shots vs wins analysis. Compares estimated open shots (from our model's `contest_label`) and actual open shots (NBA.com closest defender 4+ ft) against 2024-25 wins. |
+| **[compare_distance_vs_proxy_2014_story_thresh.ipynb](compare_distance_vs_proxy_2014_story_thresh.ipynb)** | Model comparison. Compares shot-make prediction using true defender distance versus enriched proxy features (shot clock, contest score) with threshold sweep analysis. |
+
+### Legacy / Experimental
+
+| Notebook | Description |
+|----------|-------------|
+| **[NBA_Shot_Data_Exploration.ipynb](NBA_Shot_Data_Exploration.ipynb)** | Initial data exploration. Shot distance distributions, shot charts, FG% leaders, heatmaps, and team profiles. |
+| **[NBA_Shot_Data_Exploration_Updated_2013-2014.ipynb](NBA_Shot_Data_Exploration_Updated_2013-2014.ipynb)** | Extended exploration for 2013-14 data. Adds team 3PA rate vs PPG, top scorers, and individual bad shot percentages. |
+| **[data-visualization.ipynb](data-visualization.ipynb)** | Early visualization notebook for 2015-16. Shot distributions, FG% by distance, and initial model comparisons. |
+| **[enrich_savant_shots_v2.ipynb](enrich_savant_shots_v2.ipynb)** | Legacy enrichment for NBA Savant data. Adds contest classification and derives shot values for 2013-14 seasons. |
+| **[nba_shot_quality_pipeline_old.ipynb](nba_shot_quality_pipeline_old.ipynb)** | Original pipeline. End-to-end Gradient Boosting model predicting shot makes and computing per-player "luck" (actual minus expected points). |
+| **[nba_personId_fullname_2013_2025.ipynb](nba_personId_fullname_2013_2025.ipynb)** | Utility notebook. Fetches and maps NBA player `personId` to full names across 2013-2025 seasons via `nba_api`. |
+| **[shot_clock_debug.ipynb](shot_clock_debug.ipynb)** | Debugging notebook. Investigates shot clock reconstruction accuracy and edge cases. |
+
 ## Project Structure
 
 ```
