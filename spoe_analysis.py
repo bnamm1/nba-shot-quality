@@ -376,6 +376,11 @@ def main(argv=None):
                     default=list(range(2013, 2025)))
     ap.add_argument("--min-shots", type=int, default=100,
                     help="minimum shots for a player-season (default 100)")
+    ap.add_argument("--write-player-csv", action="store_true",
+                    help="also regenerate player_performance_vs_expected.csv for "
+                         "the latest season using this corrected methodology "
+                         "(context-only model, out-of-fold scoring), keeping the "
+                         "original columns and adding uncertainty")
     args = ap.parse_args(argv)
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -489,6 +494,35 @@ def main(argv=None):
         "  reliability is an average across a heterogeneous set.",
     ]
     (OUT_DIR / "summary.md").write_text("\n".join(lines) + "\n")
+
+    if args.write_player_csv:
+        # Same columns as the original so existing consumers keep working, plus
+        # the uncertainty the original could not express.
+        latest_ps = ps_eb[ps_eb["season"] == latest].copy()
+        out = pd.DataFrame({
+            "personId": latest_ps["personId"],
+            "playerName": latest_ps["playerName"],
+            "total_shots": latest_ps["n_shots"],
+            "actual_points": latest_ps["actual"],
+            "exp_points": latest_ps["expected"],
+            "points_diff": latest_ps["spoe"],
+            "pct_diff": latest_ps["spoe"] / latest_ps["expected"] * 100,
+            "se": latest_ps["se"],
+            "z": latest_ps["z"],
+            "ci_lo": latest_ps["ci_lo"],
+            "ci_hi": latest_ps["ci_hi"],
+            "significant": latest_ps["significant"],
+            "shrinkage": latest_ps["shrinkage"],
+            "points_diff_shrunk": latest_ps["spoe_shrunk_total"],
+        }).sort_values("points_diff", ascending=False)
+
+        target = REPO / "player_performance_vs_expected.csv"
+        backup = REPO / "player_performance_vs_expected_v4_insample.csv"
+        if target.exists() and not backup.exists():
+            target.rename(backup)
+            print(f"\npreserved previous version -> {backup.name}")
+        out.to_csv(target, index=False)
+        print(f"wrote {target.name} ({len(out):,} players, {latest})")
 
     print(f"\nyear-over-year r = {r_all:.3f} ({len(yoy):,} pairs)")
     print(f"reliability      = {eb['reliability']:.3f}  "

@@ -6,9 +6,9 @@ leave-one-season-out so no shot informs its own expectation.
 
 ## Answer
 
-- Year-over-year correlation of per-shot SPOE: **r = 0.570** (2,812 player pairs)
-- Share of observed SPOE spread that is real between-player difference (empirical-Bayes reliability): **63.9%**
-- Between-player SD of true SPOE rate: **7.05** points per 100 shots (0.07053 per shot)
+- Year-over-year correlation of per-shot SPOE: **r = 0.514** (3,484 player pairs)
+- Share of observed SPOE spread that is real between-player difference (empirical-Bayes reliability): **57.5%**
+- Between-player SD of true SPOE rate: **7.25** points per 100 shots (0.07250 per shot)
 
 These two are computed independently -- a correlation and a variance decomposition --
 so their agreement (or not) is a check on both.
@@ -17,6 +17,7 @@ so their agreement (or not) is a check on both.
 
 | Min shots in both seasons | Pairs | r |
 |---|---|---|
+| >=100 | 3,484 | 0.514 |
 | >=200 | 2,812 | 0.570 |
 | >=400 | 1,767 | 0.620 |
 | >=600 | 1,036 | 0.670 |
@@ -29,20 +30,20 @@ skill.
 ## Uncertainty on individual players
 
 Each shot is a Bernoulli trial, so a player's season SPOE has variance
-`sum v_i^2 p_i (1 - p_i)`. Using 95% Wald intervals across 3,880 player-seasons
-(>= 200 shots):
+`sum v_i^2 p_i (1 - p_i)`. Using 95% Wald intervals across 4,691 player-seasons
+(>= 100 shots):
 
-- **535** are significantly above expectation
-- **527** are significantly below
-- **2,818** (72.6%) are **not distinguishable from zero**
+- **552** are significantly above expectation
+- **629** are significantly below
+- **3,510** (74.8%) are **not distinguishable from zero**
 
 ## Empirical Bayes
 
-- League mean SPOE rate: 0.00447 points/shot
-- Observed variance of player rates: 0.007790
-- Mean sampling variance: 0.002816
-- Between-player variance tau^2: 0.004974
-- Reliability tau^2 / (tau^2 + s^2): **0.639**
+- League mean SPOE rate: 0.00144 points/shot
+- Observed variance of player rates: 0.009140
+- Mean sampling variance: 0.003883
+- Between-player variance tau^2: 0.005256
+- Reliability tau^2 / (tau^2 + s^2): **0.575**
 
 `player_season_spoe.csv` carries a shrunk estimate per player-season;
 shrinking toward the league mean in proportion to each player's noise is
