@@ -932,6 +932,10 @@ def write_all_seasons_summary(df: pd.DataFrame, path: Path):
 
 
 def main(argv=None):
+    # Rebound below from --enriched-dir / --out-dir; declared here because the
+    # argparse help text references them.
+    global ENRICHED_DIR, OUT_DIR, CACHE_DIR
+
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--seasons", type=int, nargs="+", default=[2024],
@@ -942,7 +946,21 @@ def main(argv=None):
     ap.add_argument("--summarize-only", action="store_true",
                     help="skip validation; rebuild the cross-season summary from "
                          "per-season outputs already in shot_clock_validation/")
+    ap.add_argument("--enriched-dir", type=Path, default=None,
+                    help="directory of enriched shot CSVs "
+                         f"(default: {ENRICHED_DIR.name}/)")
+    ap.add_argument("--out-dir", type=Path, default=None,
+                    help="where to write results; use a separate directory to "
+                         f"compare against an existing run (default: {OUT_DIR.name}/)")
     args = ap.parse_args(argv)
+
+    # Rebind module-level paths so every downstream function follows.
+    if args.enriched_dir:
+        ENRICHED_DIR = args.enriched_dir
+    if args.out_dir:
+        OUT_DIR = args.out_dir
+        # Keep the shared ground-truth cache so a second run costs no requests.
+        CACHE_DIR = REPO / "shot_clock_validation" / "cache"
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
