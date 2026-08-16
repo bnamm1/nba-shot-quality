@@ -9,7 +9,7 @@ so nothing below is a per-shot accuracy figure.
 
 - Proxy field-goal attempts: **211,707**
 - NBA.com field-goal attempts: **198,194** (+6.82% difference)
-- Proxy shots with no reconstructable clock: **7,342** (3.47%)
+- Proxy shots with no reconstructable clock: **5,742** (2.71%)
 
 ## Test 1 — FG% by shot-clock range (strongest test)
 
@@ -18,28 +18,28 @@ quality model actually consumes.
 
 | Range | Proxy FG% | NBA.com FG% | Diff |
 |---|---|---|---|
-| 24-22 | 46.1% | 59.6% | -13.5 pp |
-| 22-18 | 52.6% | 54.6% | -2.0 pp |
-| 18-15 | 47.2% | 49.7% | -2.5 pp |
-| 15-7 | 46.7% | 48.2% | -1.5 pp |
-| 7-4 | 44.6% | 45.4% | -0.9 pp |
-| 4-0 | 41.3% | 36.4% | +4.9 pp |
+| 24-22 | 54.6% | 59.6% | -5.0 pp |
+| 22-18 | 50.9% | 54.6% | -3.7 pp |
+| 18-15 | 46.8% | 49.7% | -2.9 pp |
+| 15-7 | 45.3% | 48.2% | -2.9 pp |
+| 7-4 | 44.5% | 45.4% | -0.9 pp |
+| 4-0 | 41.1% | 36.4% | +4.7 pp |
 
-- Correlation of the two FG% curves across ranges: **r = 0.6975**
-- Mean absolute FG% deviation: **4.20 pp**
+- Correlation of the two FG% curves across ranges: **r = 0.9724**
+- Mean absolute FG% deviation: **3.36 pp**
 
 ## Test 2 — Distribution of attempts across ranges
 
 | Range | Proxy share | NBA.com share | Diff |
 |---|---|---|---|
-| 24-22 | 0.8% | 5.4% | -4.6 pp |
-| 22-18 | 11.0% | 14.9% | -3.9 pp |
-| 18-15 | 11.4% | 17.3% | -5.9 pp |
-| 15-7 | 47.6% | 44.4% | +3.2 pp |
-| 7-4 | 14.7% | 9.5% | +5.2 pp |
-| 4-0 | 14.5% | 8.5% | +6.0 pp |
+| 24-22 | 5.5% | 5.4% | +0.1 pp |
+| 22-18 | 15.3% | 14.9% | +0.4 pp |
+| 18-15 | 14.0% | 17.3% | -3.3 pp |
+| 15-7 | 40.7% | 44.4% | -3.7 pp |
+| 7-4 | 12.4% | 9.5% | +2.9 pp |
+| 4-0 | 12.1% | 8.5% | +3.6 pp |
 
-- Total variation distance: **0.1440** (0 = identical, 1 = disjoint)
+- Total variation distance: **0.0699** (0 = identical, 1 = disjoint)
 
 ## Test 3 — Upper bound on per-shot range agreement
 
@@ -49,7 +49,7 @@ may be far below. Conditioning on more observables tightens the bound.
 
 | Conditioning | Cells | Bound (all shots) | Bound (classified only) |
 |---|---|---|---|
-| player | 537 | **79.8%** | 82.6% |
+| player | 537 | **86.4%** | 88.8% |
 
 ## Sensitivity — bucket edge convention
 
@@ -58,8 +58,8 @@ under both conventions:
 
 | Convention | TVD | Bound (all shots) |
 |---|---|---|
-| right-closed (default) | 0.1440 | 79.8% |
-| left-closed | 0.1046 | 83.3% |
+| right-closed (default) | 0.0699 | 86.4% |
+| left-closed | 0.0717 | 86.8% |
 
 ## Diagnostic — where the bias comes from
 
@@ -70,8 +70,8 @@ no such gap. Teams push in transition after a made basket, so dead-ball
 possessions should if anything show *more* clock remaining, not less.
 
 - Dead-ball resets (made_fg, final_ft): n=78,489, mean **8.38s** remaining, 22.9% at <=4s
-- Live-ball resets (def_reb, off_reb): n=84,433, mean **13.41s** remaining, 6.2% at <=4s
-- Gap: **-5.03s** in the wrong direction
+- Live-ball resets (def_reb, off_reb): n=85,324, mean **15.86s** remaining, 4.4% at <=4s
+- Gap: **-7.49s** in the wrong direction
 
 This localises the dominant error: the reconstruction charges dead-ball
 possessions for inbound time that never ran off the shot clock, pushing
