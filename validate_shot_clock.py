@@ -101,6 +101,13 @@ BUCKET_EDGES = [(22, 24), (18, 22), (15, 18), (7, 15), (4, 7), (0, 4)]
 # passing the all-pairs CVD gate; used unchanged, so no re-validation needed.
 C_PROXY = "#2a78d6"   # slot 1, blue
 C_TRUTH = "#eb6834"   # slot 2, orange
+
+# Reference sequential ramp (blue 100->700), light to dark. Used for the one
+# heatmap; the full range is permitted for continuous magnitude, where the
+# lightest step means "near zero" and may recede toward the surface.
+SEQ_BLUE = ["#cde2fb", "#b7d3f6", "#9ec5f4", "#86b6ef", "#6da7ec", "#5598e7",
+            "#3987e5", "#2a78d6", "#256abf", "#1c5cab", "#184f95", "#104281",
+            "#0d366b"]
 INK = "#0b0b0b"
 INK_SECONDARY = "#52514e"
 MUTED = "#898781"
@@ -381,6 +388,11 @@ def reset_bias(proxy: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
 
 
 def fig_reset_bias(tbl: pd.DataFrame, season: str, path: Path):
+    # "mixed" is a residual, not a peer series, so it deliberately takes the
+    # neutral ink rather than a categorical slot: the point of the figure is the
+    # dead-ball/live-ball contrast with everything else set aside. It fails the
+    # palette validator's chroma floor by design ("reads gray") while still
+    # clearing CVD separation (dE 9.8) and the normal-vision floor (17.6).
     colors = {"dead-ball": C_TRUTH, "live-ball": C_PROXY, "mixed": MUTED}
     sub = tbl[tbl["n"] > 500]
     fig, ax = plt.subplots(figsize=(8.5, 5))
@@ -525,8 +537,10 @@ def fig_source_profile(proxy: pd.DataFrame, season: str, path: Path):
            .reindex(top))
     frac = mat.div(mat.sum(axis=1), axis=0)
 
+    cmap = matplotlib.colors.LinearSegmentedColormap.from_list(
+        "ref_blue", SEQ_BLUE)
     fig, ax = plt.subplots(figsize=(8.5, 5))
-    im = ax.imshow(frac.values, cmap="Blues", aspect="auto", vmin=0, vmax=1)
+    im = ax.imshow(frac.values, cmap=cmap, aspect="auto", vmin=0, vmax=1)
     ax.set_xticks(range(len(BUCKETS)), [BUCKET_SHORT[b] for b in BUCKETS])
     ax.set_yticks(range(len(top)), top)
     ax.grid(False)
