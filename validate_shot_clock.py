@@ -737,6 +737,14 @@ def run_season(year: int, condition: bool) -> dict:
     write_summary(OUT_DIR / f"summary_{season}.md", season, league, bounds,
                   sens, proxy, truth, contrast)
 
+    # Persist the scalars so --summarize-only can rebuild without re-running.
+    (OUT_DIR / f"metrics_{season}.json").write_text(json.dumps({
+        "season": season,
+        "agreement_bound_pct": bounds["player"]["bound_all_shots"] * 100,
+        "coverage_pct": bounds["player"]["coverage"] * 100,
+        "dead_live_gap_seconds": contrast["gap_seconds"],
+    }, indent=2))
+
     corr = league[["proxy_fg_pct", "truth_fg_pct"]].corr().iloc[0, 1]
     tvd = 0.5 * league["share_diff"].abs().sum()
     print(f"  FG% curve correlation : r = {corr:.4f}")
@@ -748,6 +756,181 @@ def run_season(year: int, condition: bool) -> dict:
     return {"season": season, "corr": corr, "tvd": tvd, "bounds": bounds}
 
 
+# The 14-second offensive-rebound reset took effect in 2018-19. compute_shot_clock_v4
+# applies it unconditionally, so seasons before this exercise a rule that did not
+# exist yet -- the reason the metrics below break into two regimes.
+RULE_CHANGE_SEASON = "2018-19"
+
+
+def collect_seasons() -> pd.DataFrame:
+    """Rebuild the cross-season table from per-season outputs already on disk."""
+    import re
+    rows = []
+    for f in sorted(OUT_DIR.glob("league_comparison_*.csv")):
+        m = re.search(r"(\d{4}-\d{2})", f.name)
+        if not m:
+            continue
+        d = pd.read_csv(f, index_col=0)
+        season = m.group(1)
+        extra = {}
+        mf = OUT_DIR / f"metrics_{season}.json"
+        if mf.exists():
+            extra = {k: v for k, v in json.loads(mf.read_text()).items()
+                     if k != "season"}
+        rows.append({
+            **extra,
+            "season": season,
+            "fg_pct_mad_pp": d["fg_pct_diff"].abs().mean() * 100,
+            "fg_pct_curve_r": d[["proxy_fg_pct", "truth_fg_pct"]].corr().iloc[0, 1],
+            "share_tvd": 0.5 * d["share_diff"].abs().sum(),
+            "proxy_share_24_22": d.loc["24-22", "proxy_share"] * 100,
+            "truth_share_24_22": d.loc["24-22", "truth_share"] * 100,
+            "proxy_share_4_0": d.loc["4-0 Very Late", "proxy_share"] * 100,
+            "truth_share_4_0": d.loc["4-0 Very Late", "truth_share"] * 100,
+        })
+    return pd.DataFrame(rows).sort_values("season").reset_index(drop=True)
+
+
+def fig_seasons(df: pd.DataFrame, path: Path):
+    """Three metrics across seasons as small multiples.
+
+    Deliberately not a dual-axis chart: the measures are on different scales, so
+    they get their own panels sharing one x-axis.
+    """
+    panels = [
+        ("fg_pct_mad_pp", "Mean absolute FG% error (pp)", "lower is better"),
+        ("share_tvd", "Distribution error (TVD)", "lower is better"),
+        ("agreement_bound_pct", "Range-agreement upper bound (%)", "higher is better"),
+    ]
+    fig, axes = plt.subplots(3, 1, figsize=(9, 9), sharex=True)
+    xs = np.arange(len(df))
+    try:
+        brk = list(df["season"]).index(RULE_CHANGE_SEASON)
+    except ValueError:
+        brk = None
+
+    for ax, (col, label, hint) in zip(axes, panels):
+        if col not in df.columns:
+            continue
+        ax.plot(xs, df[col], color=C_PROXY, linewidth=2, marker="o",
+                markersize=8, markeredgecolor=SURFACE, markeredgewidth=2)
+        if brk is not None:
+            ax.axvline(brk - 0.5, color=C_TRUTH, linewidth=1.6, linestyle="--",
+                       zorder=1)
+        ax.set_ylabel(label, fontsize=9.5)
+        ax.margins(y=0.22)
+        ax.grid(axis="x", visible=False)
+        for side in ("top", "right"):
+            ax.spines[side].set_visible(False)
+        ax.spines["left"].set_color(AXIS)
+        ax.spines["bottom"].set_color(AXIS)
+        ax.text(0.995, 0.04, hint, transform=ax.transAxes, ha="right",
+                fontsize=8.5, color=MUTED)
+
+    if brk is not None:
+        axes[0].annotate(
+            "14s offensive-rebound rule\ntakes effect (2018-19)",
+            xy=(brk - 0.5, axes[0].get_ylim()[1]), xytext=(brk + 0.15, 0.92),
+            textcoords=("data", "axes fraction"), fontsize=9, color=C_TRUTH,
+            va="top")
+
+    axes[0].set_title(
+        "Shot-clock proxy accuracy by season",
+        color=INK, fontsize=13, fontweight="600", loc="left", pad=20)
+    axes[0].text(0, 1.03, "The reconstruction applies the 14s reset in every "
+                          "season, including those predating the rule.",
+                 transform=axes[0].transAxes, color=MUTED, fontsize=9.5,
+                 va="bottom")
+    axes[-1].set_xticks(xs, df["season"], rotation=45, ha="right")
+    fig.tight_layout()
+    fig.savefig(path, dpi=200)
+    plt.close(fig)
+
+
+def write_all_seasons_summary(df: pd.DataFrame, path: Path):
+    pre = df[df["season"] < RULE_CHANGE_SEASON]
+    post = df[df["season"] >= RULE_CHANGE_SEASON]
+
+    lines = [
+        f"# Shot-clock proxy validation — {df['season'].iloc[0]} to "
+        f"{df['season'].iloc[-1]}",
+        "",
+        "Cross-season summary from `validate_shot_clock.py`. Ground truth is",
+        "NBA.com's tracking dashboard, which reports FGA/FGM per shot-clock",
+        "*range*. No per-shot accuracy figure is claimed anywhere.",
+        "",
+        "## Headline",
+        "",
+        "The proxy splits into **two regimes** at the 2018-19 rule change:",
+        "",
+        "| Era | Seasons | FG% error | TVD | Agreement bound |",
+        "|---|---|---|---|---|",
+    ]
+    for name, sub in (("Pre-2018-19", pre), ("2018-19 onward", post)):
+        if sub.empty:
+            continue
+        b = (f"{sub['agreement_bound_pct'].min():.1f}–"
+             f"{sub['agreement_bound_pct'].max():.1f}%"
+             if "agreement_bound_pct" in sub else "n/a")
+        lines.append(
+            f"| {name} | {len(sub)} | "
+            f"{sub['fg_pct_mad_pp'].min():.1f}–{sub['fg_pct_mad_pp'].max():.1f} pp | "
+            f"{sub['share_tvd'].min():.3f}–{sub['share_tvd'].max():.3f} | {b} |")
+
+    lines += [
+        "",
+        "**The pre-2018 seasons are not merely worse — the FG%/shot-clock",
+        "relationship is absent.** Curve correlation across the six ranges is",
+        "≈ 0 for 2013-14 through 2016-17 (0.006, 0.053, 0.079, −0.060). In those",
+        "seasons the proxy carries essentially no valid shot-clock signal, so any",
+        "model consuming `SHOT_CLOCK_APPROX` there is consuming noise.",
+        "",
+        "## Cause",
+        "",
+        "`compute_shot_clock_v4` applies the 14-second offensive-rebound reset",
+        "unconditionally: `add_reset(per, t, 14, \"off_reb\", ...)`. That rule only",
+        "took effect in **2018-19**; before it, an offensive rebound reset to 24.",
+        "Verified directly — in 2015-16 every `off_reb` shot is capped at 14.0s",
+        "(n=18,342, max 14.0s), roughly 10 seconds too low. `CLAUDE.md` lists this",
+        "as a known limitation, but the code does not branch on season.",
+        "",
+        "This is **separate from** the inbound-delay bias, which affects all",
+        "seasons: the proxy's 24-22 share sits at 0.5–0.8% in every season while",
+        "truth ranges 3.0–5.5%. No reset rule can produce a full-clock shot.",
+        "",
+        "## Per season",
+        "",
+        "| Season | FG% err (pp) | curve r | TVD | bound | 24-22 proxy/true | 4-0 proxy/true |",
+        "|---|---|---|---|---|---|---|",
+    ]
+    for _, r in df.iterrows():
+        b = (f"{r['agreement_bound_pct']:.1f}%"
+             if "agreement_bound_pct" in r and pd.notna(r.get("agreement_bound_pct"))
+             else "—")
+        lines.append(
+            f"| {r['season']} | {r['fg_pct_mad_pp']:.2f} | {r['fg_pct_curve_r']:+.3f} | "
+            f"{r['share_tvd']:.3f} | {b} | "
+            f"{r['proxy_share_24_22']:.1f}% / {r['truth_share_24_22']:.1f}% | "
+            f"{r['proxy_share_4_0']:.1f}% / {r['truth_share_4_0']:.1f}% |")
+
+    lines += [
+        "",
+        "## What this means for the paper",
+        "",
+        "- Shot-clock-based claims are defensible from **2018-19 onward**",
+        "  (FG% error 2.3–3.5pp across seven seasons), with the inbound-delay",
+        "  caveat stated.",
+        "- Pre-2018 seasons should be excluded, or the season-conditional reset",
+        "  fixed and the enrichment re-run, before any shot-clock claim covering",
+        "  them is made.",
+        "- Note 2015-16 ground truth looks anomalous (true 4-0 share 14.8% vs",
+        "  ~9-12% either side); worth a sanity check before citing that season.",
+        "",
+        "See `ideas_for_improvement.md` items 14-18 for the fix list.",
+    ]
+    path.write_text("\n".join(lines) + "\n")
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -756,27 +939,36 @@ def main(argv=None):
     ap.add_argument("--condition", action="store_true",
                     help="also condition the bound on period (4x more requests, "
                          "tighter bound)")
+    ap.add_argument("--summarize-only", action="store_true",
+                    help="skip validation; rebuild the cross-season summary from "
+                         "per-season outputs already in shot_clock_validation/")
     args = ap.parse_args(argv)
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
     results = []
-    for year in args.seasons:
-        try:
-            results.append(run_season(year, args.condition))
-        except (FileNotFoundError, RuntimeError) as e:
-            print(f"  SKIPPED {season_label(year)}: {e}", file=sys.stderr)
+    if not args.summarize_only:
+        for year in args.seasons:
+            try:
+                results.append(run_season(year, args.condition))
+            except (FileNotFoundError, RuntimeError) as e:
+                print(f"  SKIPPED {season_label(year)}: {e}", file=sys.stderr)
 
-    if len(results) > 1:
-        rows = [{"season": r["season"], "fg_pct_curve_r": r["corr"],
-                 "share_tvd": r["tvd"],
-                 "agreement_bound": r["bounds"]["player"]["bound_all_shots"]}
-                for r in results]
-        df = pd.DataFrame(rows)
+    # Cross-season view, rebuilt from whatever per-season outputs exist on disk
+    # so it can be regenerated without re-running the full validation.
+    df = collect_seasons()
+    if len(df) > 1:
+        if "agreement_bound_pct" not in df.columns:
+            df["agreement_bound_pct"] = np.nan
         df.to_csv(OUT_DIR / "summary_all_seasons.csv", index=False)
-        print(f"\n{df.to_string(index=False)}")
-    return 0 if results else 1
+        fig_seasons(df, OUT_DIR / "fig5_accuracy_by_season.png")
+        write_all_seasons_summary(df, OUT_DIR / "summary_all_seasons.md")
+        cols = [c for c in ["season", "fg_pct_mad_pp", "fg_pct_curve_r",
+                            "share_tvd", "agreement_bound_pct"] if c in df]
+        print(f"\n{df[cols].to_string(index=False)}")
+        print(f"\n  -> {OUT_DIR}/summary_all_seasons.md")
+    return 0 if (results or args.summarize_only) else 1
 
 
 if __name__ == "__main__":
