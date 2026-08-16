@@ -49,10 +49,30 @@ Primary target: **Wharton Sports Analytics Journal**
 - **Processing**: Batched by (gameId, personId) pairs, writing every 50 pairs to manage memory
 
 ### 3. Shot Clock Reconstruction Logic
+
+**Canonical implementation: [enrich_shots.py](enrich_shots.py) (`compute_shot_clock_v5`).**
+The version inside `enrich_shots_nbastatsv3_full.ipynb` (`compute_shot_clock_v4`)
+is superseded — it applies the 14s reset in every season, which is wrong before
+2018-19. See "Season-conditional resets" below.
+
 The approximate shot clock is reconstructed by identifying possession reset events:
 - **24-second resets**: Made field goals, defensive rebounds, turnovers, jump balls, final free throws
-- **14-second resets**: Offensive rebounds (post-2018 rule), defensive violations (kicked ball, defensive 3-second, goaltending)
+- **Season-conditional resets** (`off_reb`, `def_violation`, `def_foul`): **14s from
+  2018-19 onward, 24s before**. The season is derived from `gameId` digits 3-4.
 - **Method**: For each shot, find the last reset event in the same period, calculate elapsed time since reset, cap at reset value
+
+#### Season-conditional resets
+All three 14-second branches are 2018-19 rule changes. v4 applied them
+unconditionally, which made every pre-2018 season substantially wrong — FG% error
+6.2-6.8pp vs 2.3-3.5pp after the change, and a FG%/shot-clock curve correlation of
+~0 for 2013-14 through 2016-17. v5 fixed this: pre-2018 FG% error fell to
+2.8-3.4pp and curve correlation rose to 0.91-0.97. All seven post-2018 seasons
+were verified byte-identical to v4.
+
+#### Performance
+v5 computes possession resets once per game; v4 recomputed them for every
+(game, player) pair, re-filtering the whole season each time. ~2.5-5 min per
+season vs the 10-20 min the notebook required.
 
 ### 4. Contest Classification Heuristic
 A hybrid rule-based system that scores shots using:
@@ -111,10 +131,15 @@ A hybrid rule-based system that scores shots using:
 
 ## Key Notebooks (Priority Order)
 
+### Scripts (prefer these — multi-season, reviewable diffs)
+- **[enrich_shots.py](enrich_shots.py)**: canonical enrichment (shot clock v5 + contest classification)
+- **[validate_shot_clock.py](validate_shot_clock.py)**: validates the proxy against NBA.com ground truth
+- **[swap_to_v5.py](swap_to_v5.py)**: promotes a validated enrichment to `enriched_data/`
+
 ### Primary Workflows
 1. **[NBA_Shot_Quality_Modeling_XGB_CatBoost.ipynb](NBA_Shot_Quality_Modeling_XGB_CatBoost.ipynb)**: Complete ML pipeline from enriched data to Pythagorean standings
 2. **[NBA_Shot_Data_Exploration_2024_25_FULL.ipynb](NBA_Shot_Data_Exploration_2024_25_FULL.ipynb)**: Comprehensive visualization suite for enriched shot data
-3. **[enrich_shots_nbastatsv3_full.ipynb](enrich_shots_nbastatsv3_full.ipynb)**: Data enrichment pipeline (shot clock + contest classification)
+3. **[enrich_shots_nbastatsv3_full.ipynb](enrich_shots_nbastatsv3_full.ipynb)**: superseded by `enrich_shots.py`; retains the v4 shot clock
 
 ### Legacy/Experimental
 - **[enrich_savant_shots_v2.ipynb](enrich_savant_shots_v2.ipynb)**: Legacy enrichment for NBA Savant data (2013-2014 seasons)
@@ -128,13 +153,20 @@ A hybrid rule-based system that scores shots using:
 ### Running the Full Pipeline for a New Season
 
 1. **Download raw data**: Place `nbastatsv3_YYYY.csv` in `raw_data/`
-2. **Enrich shots**:
-   - Open [enrich_shots_nbastatsv3_full.ipynb](enrich_shots_nbastatsv3_full.ipynb)
-   - Update `CSV_PATH` variable (default: `"raw_data/nbastatsv3_2024.csv"`)
-   - Update `OUTPUT_CSV` path (default: `"enriched_data/nbastatsv3_2024_enriched_shots.csv"`)
-   - Run all cells through Section 8 (full-season batch export)
-   - Output: `enriched_data/nbastatsv3_YYYY_enriched_shots.csv`
-   - Expected processing time: ~10-20 minutes for full season
+2. **Enrich shots** — use [enrich_shots.py](enrich_shots.py), not the notebook:
+   ```bash
+   python enrich_shots.py --seasons 2024                 # one season
+   python enrich_shots.py --seasons 2013 2014 2015       # several
+   ```
+   - Output: `enriched_data_v5/nbastatsv3_YYYY_enriched_shots.csv` by default, so
+     an existing `enriched_data/` is never clobbered before validation. Pass
+     `--out-dir enriched_data` to write in place.
+   - ~2.5-5 minutes per season
+   - Promote a validated set with [swap_to_v5.py](swap_to_v5.py) (dry-run by
+     default; preserves the `nba_savant_*` files, which come from a different
+     pipeline and are not regenerated)
+   - The notebook path still works but requires hand-editing `CSV_PATH` /
+     `OUTPUT_CSV` per season and uses the superseded v4 shot clock
 3. **Create visualizations**:
    - Open [NBA_Shot_Data_Exploration_2024_25_FULL.ipynb](NBA_Shot_Data_Exploration_2024_25_FULL.ipynb)
    - Update `FILE_PATH` (default: `"enriched_data/nbastatsv3_2024_enriched_shots.csv"`)
@@ -219,9 +251,9 @@ pip install pandas numpy scikit-learn xgboost catboost matplotlib jupyter
 
 ### Shot Clock Rules
 - Regular possession: 24 seconds
-- Offensive rebound: 14 seconds (2018-19 rule change)
-- Defensive violations: 14 seconds to offense
-- Note: Pre-2018 seasons used 24-second reset on offensive rebounds
+- Offensive rebound: 14 seconds **from 2018-19**, 24 seconds before
+- Defensive violations / defensive fouls retaining possession: same split
+- `compute_shot_clock_v5` branches on season for all three; `v4` did not
 
 ### Game ID Format
 - Format: 10 digits, e.g., `0022400001`
@@ -245,11 +277,32 @@ pip install pandas numpy scikit-learn xgboost catboost matplotlib jupyter
 ## Known Limitations & Data Quality Issues
 
 ### Shot Clock Approximation
-- **Timing artifacts**: Many made shots recorded at `SHOT_CLOCK_APPROX ≤ 0.5` seconds due to event logging timing. The visualization notebook filters these out for heatmap analysis (EPS=0.5 threshold) while keeping late-clock misses to preserve genuine heaves.
+
+Quantified against NBA.com ground truth by [validate_shot_clock.py](validate_shot_clock.py);
+see `shot_clock_validation/summary_all_seasons.md`.
+
+- **Inbound delays — the dominant remaining error.** Dead-ball resets (`made_fg`,
+  `final_ft`) start the clock at the event timestamp, but the real clock starts on
+  the inbound touch. Dead-ball possessions average **8.7s** remaining vs **13.3s**
+  for live-ball ones — a 4.6s gap in the wrong direction, since teams push in
+  transition after a made basket. Consequence: no reset rule can produce a
+  full-clock shot (proxy 24-22 share is 0.5-0.8% in every season against a true
+  3.0-5.5%), and the 4-0 range is diluted with ordinary shots. **Do not patch with
+  a constant offset** — it improves the distribution while degrading the FG%
+  relationship.
+- **Integer-valued output**: `_abs_time()` parses `PT11M43.00S` with `int()`,
+  discarding decimals, so `SHOT_CLOCK_APPROX` takes only 25 distinct values and is
+  floored. Range-edge convention therefore moves whole integer classes between
+  ranges.
 - **"Minimum 14" rule**: Does not model NBA rule where shot clock resets to 14 OR remaining time, whichever is greater
-- **Inbound delays**: Does not track time between whistle and inbound pass
 - **Retained possession**: Technical/flagrant free throws may not accurately track possession retention
-- **Missing data**: ~0.7% of shots have no identifiable reset event (`SHOT_CLOCK_SOURCE: "no_reset_found"`)
+- **Missing data**: **~2.9-3.6%** of shots have no reconstructable clock
+  (`no_reset_found` or `stale_reset`). An earlier version of this file said 0.7%,
+  which was wrong.
+- **Ground truth is incomplete pre-2018**: our play-by-play FGA exceeds NBA.com's
+  tracking FGA by +6.3 to +6.5% for 2013-14 through 2016-17, vs +0.19 to +0.70%
+  from 2018-19 on. Pre-2018 validation compares the full shot set against a ~94%
+  sample of it.
 
 ### Contest Classification
 - **Rule-based heuristic**: Not ground truth defender distance (not available in NBA Stats v3 API)
