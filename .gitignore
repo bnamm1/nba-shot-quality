@@ -4,3 +4,7 @@
 # Python bytecode
 __pycache__/
 *.pyc
+
+# v5 enrichment output: regenerable via enrich_shots.py, and NOT covered by
+# the enriched_data/*.csv LFS rule. Swap into enriched_data/ to version it.
+enriched_data_v5/
