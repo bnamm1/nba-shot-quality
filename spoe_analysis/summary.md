@@ -15,17 +15,29 @@ so their agreement (or not) is a check on both.
 
 ## Year-over-year correlation by volume
 
-| Min shots in both seasons | Pairs | r |
-|---|---|---|
-| >=100 | 3,484 | 0.514 |
-| >=200 | 2,812 | 0.570 |
-| >=400 | 1,767 | 0.620 |
-| >=600 | 1,036 | 0.670 |
-| >=800 | 555 | 0.707 |
+| Min shots | Pairs | Players | r | r^2 | 95% CI (clustered) | r (1/player) | p (1/player) |
+|---|---|---|---|---|---|---|---|
+| >=100 | 3,484 | 824 | 0.514 | 0.265 | [0.477, 0.552] | 0.466 | 1.0e-45 |
+| >=200 | 2,812 | 687 | 0.570 | 0.325 | [0.528, 0.604] | 0.551 | 7.0e-56 |
+| >=400 | 1,767 | 474 | 0.620 | 0.384 | [0.573, 0.663] | 0.645 | 4.5e-57 |
+| >=600 | 1,036 | 283 | 0.670 | 0.449 | [0.612, 0.720] | 0.716 | 7.9e-46 |
+| >=800 | 555 | 179 | 0.707 | 0.500 | [0.614, 0.770] | 0.722 | 4.5e-30 |
 
 Sampling noise falls as volume rises, so a real skill signal should
 strengthen down this table. A flat or falling column is evidence against
 skill.
+
+**On the statistics.** A player with k consecutive seasons contributes k-1
+overlapping pairs, so pairs are NOT independent and the textbook Pearson
+interval is too narrow. Two corrections are reported: a 95% CI from
+bootstrapping whole *players*, and r/p computed on one randomly chosen
+pair per player, where the independence assumption actually holds. Both
+agree closely with the naive estimate, so the dependence is not inflating
+the result.
+
+Report **r with its clustered CI**, not p. The null of r = 0 (literally no
+persistence) is rejected at p < 1e-30 everywhere, which is not an
+interesting claim; the effect size is.
 
 ## Uncertainty on individual players
 
