@@ -77,6 +77,27 @@ The headline: the FG%/shot-clock relationship was **absent** in 2013-14 through
 verified byte-identical to v4 (~1.47M shots, zero mismatches), confirming the
 change is inert where the rule already applied.
 
+## The fix did NOT improve model performance (important for framing)
+
+Rolling temporal validation re-run on v5 data (`rerun_rolling_validation.py`):
+AUC moved by between **+0.0001 and −0.0007** across all eight folds, and accuracy
+by ≤0.0002. Effectively zero, even though five of the training seasons went from a
+shot-clock/outcome correlation of ~0 to ~0.91.
+
+**Why this is not a contradiction.** Shot clock is a weak predictor of shot outcome
+once distance, shot type and shooter quality are known. The real FG%-by-range curve
+runs 59.2% → 35.9%, but the bulk of shots (47% of attempts, the 15-7 range) sit at
+46.4%, essentially league average. Only the tails discriminate, and they are ~12%
+of attempts. With 62 features available, gradient boosting recovers most of that
+signal from correlated features anyway.
+
+**What to claim in the paper.** The fix establishes `SHOT_CLOCK_APPROX` as a
+*valid measurement* — validated against NBA.com ground truth, TVD halved, curve
+correlation recovered. It does **not** improve prediction, and claiming otherwise
+would not survive review. The honest framing is measurement validity, plus the
+finding that shot clock carries little marginal predictive power in this model.
+That second result is publishable in its own right.
+
 ## Where the proxy stands now (2024-25, representative)
 
 **Strong in the middle, still weak at the extremes:**
