@@ -23,7 +23,7 @@ It does not modify any existing notebook or data file.
 
 Usage:
     python validate_shot_clock.py --seasons 2024
-    python validate_shot_clock.py --seasons 2018 2019 2020 --condition period
+    python validate_shot_clock.py --seasons 2018 2019 2020 --condition
 """
 
 from __future__ import annotations
