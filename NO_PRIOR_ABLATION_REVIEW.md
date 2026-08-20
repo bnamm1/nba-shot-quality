@@ -1,10 +1,14 @@
 # NO_PRIOR Ablation — Review
 
 **Companion notebooks:**
-- `NBA_Shot_Quality_Modeling_XGB_CatBoost_NO_PRIOR.ipynb`
+- `NBA_Shot_Quality_Modeling_XGB_CatBoost_NO_PRIOR.ipynb` — Model B (drops shooter priors + `teamTricode`)
 - `NBA_Shot_Quality_Year_to_Year_Validation_NO_PRIOR.ipynb`
+- `NBA_Shot_Quality_Modeling_XGB_CatBoost_NO_PRIOR_KEEP_TEAM.ipynb` — **Model C** (drops shooter priors only; keeps `teamTricode`) — added after decomposition analysis flagged a confound in Model B
+- `NBA_Shot_Quality_Year_to_Year_Validation_NO_PRIOR_KEEP_TEAM.ipynb`
 
 **Branch:** `brandon/no-prior-ablation`
+
+> ⚠️ **Reading order:** §1–3 are still correct. §4's team-level attribution is **partially wrong** — corrected in §4a (mechanism) and §4b (Model C team-level results). §4c updates the temporal-validation "double duty" hypothesis with Model C data. §5 is now written against Model C SPOE (no more A−B residual construction).
 
 ---
 
@@ -78,6 +82,8 @@ Test AUC, Model A (from paper) vs Model B (NO_PRIOR run):
 
 ## 4. Where Model B differs sharply: expected wins per team
 
+> ⚠️ **CORRECTION (see §4a):** The framing below attributes the team-level shift to shooter identity being removed. That's only partially right. The Model B ablation also removed `teamTricode`, a **team fixed effect**. Decomposition analysis (§4a) shows the team-dummy removal accounts for about two-thirds of the shift; Model C team-level results (§4b) confirm this. Read §4a and §4b before using the tables below in the paper.
+
 Even though the model's per-shot AUC barely moves, the *team-level* implications of Model B are meaningfully different. Comparing `pyth_wins_exp` team-by-team:
 
 ### Star-heavy teams — Model B predicts fewer wins
@@ -114,50 +120,215 @@ Even though the model's per-shot AUC barely moves, the *team-level* implications
 
 ---
 
-## 4a. Temporal validation: 5-fold year-to-year
+## 4a. Correction — the team-level shift is mostly the team dummy, not shooter identity
 
-The `NBA_Shot_Quality_Year_to_Year_Validation_NO_PRIOR.ipynb` notebook runs LightGBM trained on season X, tested on season X+1, across 5 folds. This is a stricter test than the single-season 80/20 split because train and test come from *different* seasons — different rosters, different roles, small rule changes.
+The Model B ablation removed seven features: six `prior_*` shooter stats **and** `teamTricode`. That last one isn't a shooter feature — it's a team fixed effect. Removing it collapses every team toward the league average, which mechanically produces exactly the pattern §4 attributed to shooter identity.
 
-| Fold | Model A AUC | Model B AUC | Δ |
+**Decomposition of team-level shift (mean |Δ pyth_wins_exp|):**
+
+| Removal | Mean shift in expected wins |
+|---|---:|
+| Team dummy alone | **4.82** |
+| Priors alone | 2.35 |
+| Both (Model B) | 8.09 (not additive — see below) |
+
+About **two-thirds** of the team-level shift comes from dropping `teamTricode`, not from dropping shooter identity.
+
+**Sacramento is the cleanest counter-example.** §4 attributes SAC's −10.25 to losing credit for DeRozan/Fox/Sabonis. But removing priors alone moves Sacramento **up** by +0.93. The −10.25 total is entirely the team dummy. Indiana's −9.49 is similar: shooter features account for only about 1.4 wins of it; the rest is the team dummy.
+
+**Shifts don't add linearly.** PHX is −3.88 (priors alone) and −3.14 (team dummy alone) separately, but −13.32 together. You can't back the correct attribution out arithmetically from Model B alone — hence Model C.
+
+### The sharpest finding: per-shot AUC doesn't validate team-level claims
+
+`teamTricode` is worth **0.0001 AUC** — literally nothing for per-shot discrimination — yet drives two-thirds of the team-level movement. That's a general point worth putting in the paper explicitly:
+
+> A feature can be useless for per-shot prediction and still dominate aggregate conclusions, because aggregation amplifies small systematic offsets.
+
+This means the paper's per-shot validation (calibration curve, confusion matrix, AUC) **does not validate its team-level claims** (Pythagorean standings, expected wins). Different metrics need different validation.
+
+### Team-level cost — all three models
+
+Team `pyth_wins_exp` accuracy against actual outcomes:
+
+**vs. `wins_actual` (real regular-season wins):**
+
+| Metric | Model A | Model B | Model C |
 |---|---:|---:|---:|
-| 2020 → 2021 | 0.6670 | 0.6560 | **-0.0110** |
-| 2021 → 2022 | 0.6724 | 0.6631 | -0.0093 |
-| 2022 → 2023 | 0.6752 | 0.6672 | -0.0080 |
-| 2023 → 2024 | 0.6711 | 0.6639 | -0.0072 |
-| 2024 → 2025 | 0.6699 | 0.6614 | -0.0085 |
-| **mean** | **0.6711** | **0.6623** | **-0.0088** |
+| Mean absolute error | **4.98** | **8.84** | **5.52** |
+| Pearson r | **0.878** | **0.648** | **0.849** |
 
-Model B: mean AUC **0.6623 ± 0.0041**, mean log loss 0.6358, mean Brier 0.2236, mean accuracy 63.22%.
+**vs. `fg_only_wins` (FG-only outcomes — model-agnostic denominator):**
 
-**The year-to-year drop is ~3× the single-season drop** (0.009 vs. 0.003 AUC). This is itself informative:
+| Metric | Model A | Model B | Model C |
+|---|---:|---:|---:|
+| Mean absolute error | **4.75** | **6.31** | **4.80** |
+| Pearson r | **0.894** | **0.791** | **0.887** |
 
-- **Single-season:** train and test share rosters, so the model can learn shot-context patterns that generalize easily. Prior features add little.
-- **Year-to-year:** rosters shift between seasons. Prior features gave Model A something *player-specific* to anchor on across the roster change; without them, Model B relies purely on shot context, which transfers less well.
+**Team `pyth_wins_exp` rank correlation (Spearman):**
 
-This means prior-shooter features were doing **double duty**:
+| Comparison | Rank correlation |
+|---|---:|
+| A vs C | **0.975** |
+| B vs C | 0.910 |
+| A vs B | 0.852 |
 
-1. **Within-season:** memorize who's a good shooter → small AUC gain, big SPOE distortion (the original concern that motivated the ablation)
-2. **Cross-season:** bridge the roster-shift gap → small but *legitimate* AUC gain from player-skill persistence
+**Interpretation confirmed.** Model C is essentially as accurate as Model A at team-level (r=0.849 vs 0.878 against real wins; r=0.887 vs 0.894 against fg-only). The team rank correlation is 0.975 — teams rank in almost the same order under A and C. All of Model B's team-level damage was the team-dummy removal, not the shooter-prior removal.
 
-Model B loses (2) but gains a clean SPOE interpretation. That's a fair tradeoff for the paper's SPOE analysis. It also means the year-to-year AUCs shouldn't be advertised as improvements — they're roughly comparable to Model A within a wider CV noise band (0.004 std here vs 0.002 in single-season).
-
-**Stability across folds is preserved.** The fold-to-fold spread (0.6560 – 0.6672) is similar to Model A's spread (0.6670 – 0.6752). Model B is stable, just at a slightly lower level.
+For the paper's abstract, the correct number to cite is **Model C: MAE 5.52, r = 0.849 against real wins**. That's an honest "substantial portion of winning" claim and preempts the reviewer's challenge that shooter identity is doing the work.
 
 ---
 
-## 5. Why this makes the paper stronger, not weaker
+## 4b. Model C team-level results — the cleanly-ablated shooter-identity signal
 
-The residual `Model A pyth_wins_exp − Model B pyth_wins_exp` per team is essentially a measurement of that team's **shooter-skill advantage above league average**. That's a new, interpretable quantity the paper can build on:
+With the confound removed, the Model A vs Model C `pyth_wins_exp` deltas are much smaller than Model B's. Mean |Δ C-A| = **2.04 wins** (compared to Model B's 5.03) — about 2.5× less movement.
 
-- **Model A** measures: shot quality that includes shooter identity → predicts actual wins reasonably.
-- **Model B** measures: shot quality from context only → predicts actual wins less well.
-- **The gap between them** is a rough decomposition of team success into "process/context" and "roster shooting talent."
+**Top 8 team-level shifts under Model C (biggest |Δ C-A|):**
 
-**Reframed team narratives:**
-- **TOR/BKN/ORL over-perform Model B** → their raw shot process was fine, but roster shooting talent was below average. Model A "knew" this because their players had low prior FG%. → *Fair value near Model A prediction; front office should recognize the process isn't broken.*
-- **PHX/IND/SAC/BOS under-perform Model B** → they won more games than pure shot context would predict. Their shooter talent was doing real work above the league baseline. → *Star-driven teams that would collapse without their scorers.*
+| Team | A | C | Δ C-A | Δ B-A (for reference) |
+|---|---:|---:|---:|---:|
+| BKN | 31.31 | 37.84 | **+6.53** | +11.65 |
+| ATL | 40.75 | 45.38 | +4.63 | +4.21 |
+| NYK | 51.84 | 48.04 | -3.80 | -5.05 |
+| HOU | 54.15 | 57.77 | +3.62 | +5.69 |
+| LAL | 36.33 | 32.71 | -3.62 | -5.23 |
+| PHX | 36.62 | 33.66 | -2.96 | **-14.79** |
+| TOR | 35.50 | 38.35 | +2.85 | **+15.88** |
+| PHI | 23.51 | 26.32 | +2.81 | +5.16 |
 
-This is a sharper paper contribution than the original "shot quality correlates with wins." It quantifies the *decomposition*, not just the correlation.
+**Compare to §4's headline outliers under Model B:**
+
+- **PHX (Booker/KD/Beal):** Model B −14.79 → **Model C −2.96**. The star-heavy narrative was ~80% team dummy, ~20% shooter identity.
+- **SAC (DeRozan/Fox/Sabonis):** Model B −10.25 → **Model C +1.20** (a sign flip!). §4a's counter-example: removing shooter priors alone actually *raises* SAC's expected wins slightly. The −10.25 was entirely the team dummy.
+- **IND (Haliburton):** Model B −9.49 → **Model C −2.63**. Most of it was team dummy.
+- **TOR:** Model B +15.88 → **Model C +2.85**. The rebuild-friendly narrative was mostly team-dummy artifact.
+- **BOS (Tatum):** Model B −7.85 → **Model C −1.14**. Nearly all team dummy.
+
+**BKN is the largest remaining outlier at +6.53** — even under the clean ablation, Model C over-predicts Brooklyn by ~6.5 wins. That's interesting on its own: the Nets' 26-56 record in 2024-25 was substantially worse than their shot quality (context-only) would predict. That could be a real story (roster shooting talent below what shot context implies), a coaching/defense issue, or a small-sample fluke — worth a sentence or two of discussion in the paper rather than dropping.
+
+**What survived from §4's original narrative:**
+- The general direction (star-heavy teams down, star-lite teams up) is preserved but *much smaller in magnitude*
+- The interpretation as "shooter-skill contribution above league average" now holds — but the effect size is 2-3 wins for most teams, not 10-15
+
+**What did NOT survive:**
+- The PHX/SAC/IND/TOR framing as headline outliers. They shrink dramatically or reverse under Model C
+- The "shooter identity dominates team wins" implication of Model B's spread
+
+---
+
+## 4c. Temporal validation: 5-fold year-to-year (mechanism CORRECTED)
+
+The year-to-year notebooks run LightGBM trained on season X, tested on season X+1, across 5 folds. This is a stricter test than the single-season 80/20 split because train and test come from *different* seasons — different rosters, different roles, small rule changes.
+
+**All three models measured:**
+
+| Fold | Model A | Model B | Model C | C-A |
+|---|---:|---:|---:|---:|
+| 2020 → 2021 | 0.6670 | 0.6560 | 0.6563 | -0.0107 |
+| 2021 → 2022 | 0.6724 | 0.6631 | 0.6639 | -0.0085 |
+| 2022 → 2023 | 0.6752 | 0.6672 | 0.6675 | -0.0077 |
+| 2023 → 2024 | 0.6711 | 0.6639 | 0.6639 | -0.0072 |
+| 2024 → 2025 | 0.6699 | 0.6614 | 0.6618 | -0.0081 |
+| **mean** | **0.6711** | **0.6623** | **0.6627** | **-0.0084** |
+
+**Key finding — Model C ≈ Model B in temporal validation.** Model C's cross-season AUC drop matches Model B's almost exactly (Δ +0.0004). This is the opposite of the single-season result, where Model C ≈ Model A.
+
+### The single-season vs. cross-season decomposition
+
+The story splits cleanly by validation regime:
+
+| Contribution | Single-season | Year-to-year |
+|---|---:|---:|
+| Removing shooter priors (A → C) | ~0 bp | **~85 bp** |
+| Removing team dummy (C → B) | ~20 bp | ~0.4 bp |
+| Both (A → B) | ~20 bp | ~85 bp |
+
+**Why the divergence?** Rosters shift between seasons. `teamTricode="MIA"` in 2020 does not refer to the same players as `teamTricode="MIA"` in 2025 — so the team fixed effect has almost no cross-season transfer value. But player-level FG% history *does* transfer: a 40% three-point shooter last year is likely to be a good shooter next year, whichever jersey they wear.
+
+### Correction to the "double duty" hypothesis
+
+The previous version of this section (§4a in the earlier draft) claimed prior features do double duty: within-season shooter memorization *and* cross-season roster bridging. That was **half right and half wrong**:
+
+- **Right:** priors bridge the cross-season roster-shift gap. That's exactly what the ~85 bp Model A → C gap in year-to-year shows.
+- **Wrong:** priors don't do meaningful within-season memorization on top of `teamTricode`. In the single-season split, priors add essentially zero AUC (see §4a decomposition). The "small AUC gain" attributed to within-season priors was really the team dummy's contribution.
+
+**The clean interpretation:**
+
+- **Within-season (paper's target regime):** shooter priors are redundant with `teamTricode`. Removing them is free (Model C ≈ Model A per-shot).
+- **Cross-season generalization:** shooter priors are the mechanism that transfers player skill. `teamTricode` cannot substitute because team identities are unstable.
+- **For the paper's SPOE analysis (single-season):** Model C is the right ablation. The priors' cross-season utility is real but orthogonal to the SPOE claim.
+
+Model C: mean AUC **0.6627 ± 0.0041** — statistically indistinguishable from Model B, roughly 85 bp below Model A. Fold-to-fold spread (0.6563 – 0.6675) is similar to Model A's (0.6670 – 0.6752). Stability across folds is preserved in all three models.
+
+---
+
+## 5. Why this makes the paper stronger, not weaker (rewritten against Model C SPOE)
+
+The paper's SPOE analysis was intended to measure over/under-performance versus a league-average shooter from the same shot context. Model A can't provide that because its "expected" baseline includes shooter identity; Model B can't either because it strips the team fixed effect the paper's team-level analysis depends on. **Model C is the right baseline for SPOE**: it drops shooter identity while keeping the team context needed for aggregation.
+
+### Player-level SPOE from Model C (high-volume shooters, ≥300 shots)
+
+**Top 10 over-performers (n=276 qualifying players):**
+
+| Player | Shots | Actual | Expected | SPOE |
+|---|---:|---:|---:|---:|
+| Jokić | 1,364 | 1,710 | 1,428 | **+281.7** |
+| Gilgeous-Alexander | 1,656 | 1,883 | 1,717 | +166.2 |
+| Pritchard | 866 | 1,073 | 923 | +149.6 |
+| LaVine | 1,223 | 1,489 | 1,341 | +147.7 |
+| Curry | 1,258 | 1,439 | 1,295 | +144.1 |
+| Durant | 1,124 | 1,344 | 1,200 | +143.9 |
+| Vučević | 1,038 | 1,229 | 1,093 | +135.5 |
+| Herro | 1,378 | 1,553 | 1,419 | +134.3 |
+| Brunson | 1,200 | 1,322 | 1,194 | +128.3 |
+| Haliburton | 1,006 | 1,170 | 1,053 | +116.9 |
+
+**Bottom 10 under-performers:**
+
+| Player | Shots | Actual | Expected | SPOE |
+|---|---:|---:|---:|---:|
+| Castle | 988 | 941 | 1,081 | -140.4 |
+| Sarr | 828 | 757 | 887 | -129.7 |
+| Coulibaly | 624 | 589 | 690 | -101.4 |
+| Johnson | 779 | 732 | 832 | -100.5 |
+| Council IV | 463 | 409 | 498 | -88.7 |
+| Mogbo | 356 | 329 | 417 | -88.4 |
+| Westbrook | 831 | 840 | 927 | -87.2 |
+| Rozier | 635 | 587 | 671 | -84.1 |
+| Anunoby | 1,027 | 1,149 | 1,229 | -80.3 |
+| Missi | 492 | 538 | 618 | -79.9 |
+
+Median SPOE across high-volume shooters: +0.81. Mean |SPOE|: 39.5 points.
+
+### Comparison to the paper's Model A leaderboard
+
+The paper reported (Model A): Jokic +148.0, LaVine +133.2, Pritchard +123.0 as top-3.
+
+**Under Model C:** Jokic **+281.7** (nearly 2× the paper's number), SGA **+166.2** (new #2), Pritchard **+149.6**, LaVine **+147.7**.
+
+**Why the numbers grew.** Model A's "expected" for Jokic already assumed elite-Jokic baseline (via `prior_fg_pct`, `prior_shot_type_pct`), so his SPOE was measuring "even better than elite baseline predicted." Model C's expected doesn't know he's Jokic — it just assigns league-average make probability given the shot context. His SPOE now correctly measures how much better than a random shooter he'd be from those exact shots. That's what the paper's SPOE definition claimed to be doing all along; Model C actually delivers it.
+
+### The buy-low / hot-shooting story now works cleanly
+
+- **Positive SPOE (top 10):** Jokić, SGA, Curry, Durant, Haliburton, Brunson, Herro — a clean list of elite shot-makers. Every name is a genuine high-volume star. The interpretation "made shots a league-average shooter wouldn't have" now holds because the expected baseline actually assumes a league-average shooter.
+- **Negative SPOE (bottom 10):** dominated by rookies and second-year players (Castle, Sarr, Coulibaly, Council IV, Mogbo, Missi) plus a few veterans past their prime (Westbrook, Rozier). This is exactly the "process is fine, execution isn't yet" pattern the paper's buy-low framing predicted — young players getting decent looks but converting at below-average rates.
+
+Under Model A, the paper's bottom-3 was Grant −82.6 / Coulibaly −79.3 / Murray −76.0 — heavily influenced by those players' prior stats. Under Model C, the bottom is more consistent (all are rookies or veterans with genuinely poor recent shooting), because the expected baseline no longer discounts weak shooters ahead of time.
+
+### Team-level residual (proper construction)
+
+The old §5 proposed measuring "team shooter-skill advantage" as `A_pyth_wins − B_pyth_wins`. That was confounded by the team fixed effect (§4a). The **correct construction is now**:
+
+**Team SPOE = `sum of Model C actual points − sum of Model C expected points`** at team level. One model, one subtraction, no confound, and it inherits the same error bars as the player-level SPOE.
+
+This is directly computable from `team_game_points_no_prior_keep_team.csv` and should replace the A−B residual construction throughout the paper's team-level discussion.
+
+### The paper's core contribution, restated
+
+- **Model A** predicts wins well (r = 0.878 vs real wins) but its SPOE conflates shot quality with shooter identity.
+- **Model C** predicts wins nearly as well (r = 0.849, MAE 5.52) and its SPOE cleanly measures over-performance vs. a league-average shooter.
+- The gap between them is small at the team level (mean shift 2.04 wins) but meaningful at the player level (Jokic's SPOE nearly doubles because his personal expected baseline stops flattering him).
+
+That's the sharper paper contribution. Not "shot quality correlates with wins" — the paper already had that. The new claim is: **using only publicly-available data, you can build a shot-quality model that predicts team wins nearly as well as one that memorizes shooter identity, and its residuals give you a clean measurement of player-level shot-making skill above expectation.**
 
 ---
 
@@ -178,23 +349,25 @@ The paper's discussion of "GSW overpredicted by +11.88" was measured against `fg
 
 **Analytical (do these to strengthen the resubmission):**
 
-1. **Recompute player-level SPOE from Model B.** Expect Jokic (+148), LaVine (+133), Pritchard (+123) to grow *larger*, since their "expected" no longer assumes elite baseline. The leaderboard reshuffle is the second half of the paper's ablation story.
+1. **Compute team-level SPOE from Model C directly** — sum of actual − expected points at team level from `team_game_points_no_prior_keep_team.csv`. Replaces the A−B residual construction throughout the paper.
 
-2. **Compute Spearman rank correlation between Model A and Model B `pyth_wins_exp` team rankings.** A low correlation (which is what the delta table above suggests) is a headline result — quantifies how much the model was "cheating" via shooter identity.
+2. **Cross-season SPOE correlation using Model C outputs.** Year-to-year within-player SPOE correlation is a persistence test — if the paper claims SPOE reflects real skill, correlations should be substantially above chance.
 
-3. **Run the year-to-year `_NO_PRIOR` notebook.** That gives the temporal stability of Model B and — more importantly — clean year-to-year SPOE correlations. This is the check that originally motivated the ablation.
+3. **Investigate BKN's +6.53 Model C shift.** The largest remaining outlier under the clean ablation. Either a real story (roster shooting talent well below what shot context implies), a defense/coaching artifact, or small-sample fluke. Worth 1-2 paragraphs in the paper.
 
 4. **Recompute the Pythagorean win exponent choice.** The paper uses 14; standard NBA choices are 14–16.5. Reporting sensitivity to this choice would preempt an obvious reviewer question.
 
 **Paper-writing (once analysis is done):**
 
-5. **Present A and B side-by-side, not as a swap.** Model A is still the "best predictive" model; Model B is the "cleanest interpretive" model. Both have a role.
+5. **Present A and C side-by-side, not A and B.** Model B is the confounded ablation and shouldn't be the paper's headline comparison. Model A is still the "best predictive" model; Model C is the "cleanest interpretive" model without the team-dummy noise.
 
-6. **Reframe SPOE as Model B's residual, not Model A's.** This is the biggest change — the paper's buy-low / hot-shooting narrative only actually works with Model B.
+6. **Reframe SPOE as Model C's residual, not Model A's or Model B's.** This is the biggest change — the paper's buy-low / hot-shooting narrative should be tested against Model C's SPOE ranking, not Model B's.
 
-7. **Add a robustness section** documenting: what was excluded, what was kept, why the AUC gap is small, and why the standings deltas are large despite that.
+7. **Add a robustness section** documenting the two-part decomposition: shooter-identity contribution (A vs C) and team fixed-effect contribution (C vs B). The "feature with 0.0001 AUC that dominates aggregate results" insight from §4a belongs here too — it's a general point about validation-metric mismatch that reviewers will find compelling.
 
-8. **Update the Discussion's team-outlier explanations** (GSW/BOS over-projection). Under Model B, GSW/BOS's gap shrinks or reverses; the free-throw and open-3 arguments in the current paper are partial explanations that Model B partially controls for.
+8. **State the r drop honestly in the abstract.** "Substantial portion of winning" now carries r = 0.648 (Model B) or an intermediate value (Model C). Report the number, don't hide it.
+
+9. **Update the Discussion's team-outlier explanations** (GSW/BOS over-projection). Under Model C, GSW/BOS's gap should reveal what part was shooter-identity vs. free-throw exclusion vs. open-3 reliance.
 
 **Repo hygiene:**
 
