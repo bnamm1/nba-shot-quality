@@ -8,8 +8,6 @@ A machine learning project exploring the connections between **shot quality**, *
 - Which teams are getting "lucky" or "unlucky" based on expected vs actual performance?
 - Can we better measure a team's true "skill" using expected points and Pythagorean winning percentage?
 
-**Target Publication**: Wharton Sports Analytics Journal
-
 ---
 
 ## Data Description
