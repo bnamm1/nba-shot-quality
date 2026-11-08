@@ -1,342 +1,229 @@
-# NBA Shot Quality Model
+# Shot Quality From Public Data
 
-A machine learning project exploring the connections between **shot quality**, **luck**, and **winning** in the NBA.
+Code and data for **"Shot Quality From Public Data: Separating Shot Generation From Shot-Making in the NBA."**
 
-## Research Goals
+The project builds a shot-quality model from free, public NBA play-by-play data. The model estimates the probability that a league-average shooter makes a given shot, using only where, when and how the shot was taken. It does not know who took the shot. Those probabilities become expected points, which support three analyses:
 
-- How does shot quality correlate with scoring and winning?
-- Which teams are getting "lucky" or "unlucky" based on expected vs actual performance?
-- Can we better measure a team's true "skill" using expected points and Pythagorean winning percentage?
-
----
-
-## Data Description
-
-**Source**: [shufinskiy/nba_data](https://github.com/shufinskiy/nba_data/tree/main/datasets) (play-by-play from NBA Stats API v3)
-
-**Raw Data** (`raw_data/nbastatsv3_YYYY.csv`):
-- **Rows**: ~7.05 million total across 12 season files (~550k–607k per season)
-- **Features**: 24 columns
-- **Time range**: 2013-14 through 2024-25 (12 seasons)
-- **Key fields**: `gameId`, `personId`, `teamTricode`, `clock`, `period`, `xLegacy`, `yLegacy`, `shotDistance`, `shotResult`, `shotValue`, `actionType`, `subType`, `description`, `location`
-
-**Enriched Data** (`enriched_data/nbastatsv3_YYYY_enriched_shots.csv`):
-- **Rows**: ~2.51 million total (field goal attempts only); ~219k per season
-- **Features**: 30 columns (24 original + 6 engineered)
-- **Engineered columns**: `ABS_TIME`, `SHOT_CLOCK_APPROX`, `SHOT_CLOCK_SOURCE`, `contest_score`, `contest_label`, `contest_reasons`
+- **Model ceiling:** how close public data gets to tracking-data models.
+- **Skill vs. luck:** whether Shooting Performance Over Expectation (SPOE) is persistent skill or noise, using exact Bernoulli confidence bands.
+- **Winning:** how much of a team's record comes from shot generation (the offense's process) versus shot-making (the roster), via Pythagorean expected wins.
 
 ---
 
-## Model Performance
+## Key results (2024–25, held-out test set of 43,906 shots)
 
-### Models (12 + voting ensemble)
-| Category | Models |
-|----------|--------|
-| **Boosting (Optuna-tuned)** | LightGBM, HistGradientBoosting, GradientBoosting, XGBoost, CatBoost |
-| **Ensemble** | RandomForest, ExtraTrees, AdaBoost |
-| **Other** | LogisticRegression, MLP, GaussianNB, KNN |
-| **Meta** | VotingEnsemble (soft voting over top 5 boosters) |
-
-### Best Results (2024-25 season)
-| Model | Test AUC | Description |
-|-------|----------|-------------|
-| **LightGBM** | 0.667 | Best single model (Bayesian-optimized) |
-| Voting Ensemble | 0.667 | Soft voting over top 5 |
-| XGBoost | 0.667 | |
-| Gradient Boosting | 0.666 | |
-| CatBoost | 0.666 | |
-
-### Configuration
-- `N_OPTUNA_TRIALS = 10` (Bayesian hyperparameter optimization via Optuna TPE)
-- `PYTH_EXP = 14` (Pythagorean win formula exponent)
-- `RANDOM_STATE = 42`
-- Cross-validation: 3-fold stratified, results reported as mean ± std
-
-### Model Details
-
-**Baseline models** (static hyperparameters):
-| Model | Key Hyperparameters |
-|-------|-------------------|
-| Logistic Regression | `solver="saga", max_iter=2000, C=0.5` |
-| kNN | `n_neighbors=15, weights='distance'` |
-| Random Forest | `n_estimators=500, max_depth=12, min_samples_leaf=5` |
-| Gradient Boosting | `n_estimators=300, max_depth=5, learning_rate=0.1` |
-| MLP | `hidden_layer_sizes=(128,64), max_iter=500, early_stopping=True` |
-| Extra Trees | `n_estimators=500, max_depth=12, min_samples_leaf=5` |
-| AdaBoost | `n_estimators=200, learning_rate=0.1` |
-| Naive Bayes | Default (no tuning) |
-| HistGradientBoosting | `max_iter=500, max_depth=8, learning_rate=0.05` |
-
-**Optuna-tuned models** (Bayesian optimization, 10 trials, TPE sampler):
-| Model | Tuned Hyperparameters |
-|-------|----------------------|
-| XGBoost | `n_estimators`, `max_depth`, `learning_rate`, `subsample`, `colsample_bytree`, `reg_alpha`, `reg_lambda`, `min_child_weight` |
-| CatBoost | `iterations`, `depth`, `learning_rate`, `l2_leaf_reg`, `bagging_temperature`, `random_strength` |
-| LightGBM | `n_estimators`, `max_depth`, `learning_rate`, `num_leaves`, `subsample`, `colsample_bytree`, `reg_alpha`, `reg_lambda`, `min_child_samples` |
-| Gradient Boosting | `n_estimators`, `max_depth`, `learning_rate`, `subsample`, `min_samples_split`, `min_samples_leaf` |
-| HistGradientBoosting | `max_iter`, `max_depth`, `learning_rate`, `max_leaf_nodes`, `min_samples_leaf`, `l2_regularization` |
-
-### Feature Importance Insights
-
-**Top-tier features** (shot location + player history):
-- Court position (`xLegacy`, `yLegacy`) dominates
-- Player skill (`prior_fg_pct`) is a top-5 predictor
-- Prior attempts indicate high-volume shooter patterns
-
-**Key finding**: Prior season features add significant predictive power — 6 of the top 20 features are `prior_*` or `opp_def_*` historical stats.
+| Result | Value |
+|---|---|
+| LightGBM test AUC / accuracy | **0.665** / 63.5% (always-miss baseline: 53.3%) |
+| Calibration (mean absolute error) | 1.0 percentage point |
+| Shot location alone (`xLegacy`, `yLegacy`, `shot_angle_rad`) | AUC 0.643 |
+| Adding shooter identity (Model A, ablation only) | AUC 0.667 |
+| Seven tree-ensemble models | within 0.003 AUC of each other |
+| Year-to-year validation (train season X, test X+1) | AUC 0.656–0.667 |
+| Year-over-year SPOE correlation (≥200 attempts in both seasons) | r = 0.570 |
+| Share of between-player SPOE variance that is persistent skill | 57.5% |
+| Expected wins vs. actual wins (30 teams) | r = 0.65 |
 
 ---
 
-## Features
+## Which model is which
 
-### Base Features (from enriched data)
-| Feature | Description |
-|---------|-------------|
-| `shotDistance` | Distance from basket in feet (0-47 ft) |
-| `SHOT_CLOCK_APPROX` | Approximate shot clock when shot taken (0-24 sec) |
-| `xLegacy`, `yLegacy` | Court coordinates (tenths of feet) |
-| `contest_score` | Heuristic difficulty score (-2 to +4) |
-| `shotValue` | Point value (2 or 3) |
+The paper's model is **Model B**. The other two notebooks are kept for comparison.
 
-### Prior Season Features (11 features)
-Player historical stats and opponent defensive ratings from the **previous season** to avoid data leakage:
+| Model | Notebook | What it sees | Role |
+|---|---|---|---|
+| **B (paper)** | [`NBA_Shot_Quality_Modeling_XGB_CatBoost_NO_PRIOR.ipynb`](NBA_Shot_Quality_Modeling_XGB_CatBoost_NO_PRIOR.ipynb) | Shot context only. No shooter history, no team identity | All results in the paper |
+| A | [`NBA_Shot_Quality_Modeling_XGB_CatBoost.ipynb`](NBA_Shot_Quality_Modeling_XGB_CatBoost.ipynb) | Model B's inputs plus the shooter's prior-season FG%, 3PT%, 2PT% and attempts | "+ shooter identity" ablation only |
+| C | [`NBA_Shot_Quality_Modeling_XGB_CatBoost_NO_PRIOR_KEEP_TEAM.ipynb`](NBA_Shot_Quality_Modeling_XGB_CatBoost_NO_PRIOR_KEEP_TEAM.ipynb) | Model B's inputs plus team identity | Diagnostic only |
 
-| Feature | Description |
-|---------|-------------|
-| `prior_fg_pct` | Player's FG% from prior season |
-| `prior_fg3_pct` | Player's 3PT% from prior season |
-| `prior_fg2_pct` | Player's 2PT% from prior season |
-| `prior_attempts` | Total shot attempts in prior season |
-| `opp_def_fg_pct` | Opponent's overall FG% allowed |
-| `opp_def_rim_pct` | Opponent's rim FG% allowed |
-| `opp_def_3pt_pct` | Opponent's 3PT% allowed |
-
-### Engineered Features
-- **Shot Location**: `is_paint`, `is_midrange`, `is_corner3`, `is_above_break3`
-- **Shot Clock Buckets**: `clock_0_4`, `clock_4_8`, ..., `clock_20_24`
-- **Interactions**: `clock_x_distance`, `clock_x_paint`, `rhythm_x_distance`
-- **Text-Parsed**: `is_pullup`, `is_stepback`, `is_fadeaway`, `is_driving`, `is_floating`, `is_cutting`, `is_tip`, `is_putback`, `is_second_chance`
+Shooter identity is excluded from Model B on purpose. Shot quality should score the shot, not the shooter, and SPOE is only meaningful if the expected points don't already encode shooter skill. See [`NO_PRIOR_ABLATION_REVIEW.md`](NO_PRIOR_ABLATION_REVIEW.md).
 
 ---
 
-## Temporal Validation
+## Reproducing the paper
 
-### Rolling Temporal (Train: 2014-N, Test: N+1)
+Notebook sections are listed by their headings as they appear in the notebook.
 
-Expanding window: train on all prior seasons, test on the next unseen season.
+| Paper result | Where it is produced | Output |
+|---|---|---|
+| Enriched shot data (reconstructed shot clock, contest score) | [`enrich_shots.py`](enrich_shots.py) | `enriched_data/` |
+| Shot-clock validation (83.8–86.4% agreement bound with NBA.com) | [`validate_shot_clock.py`](validate_shot_clock.py) | [`shot_clock_validation/summary_all_seasons.md`](shot_clock_validation/summary_all_seasons.md) |
+| Model comparison (12 models + voting ensemble) | Model B, *5) Model comparison* | `model_results_no_prior.csv` |
+| Year-to-year validation | [`NBA_Shot_Quality_Year_to_Year_Validation_NO_PRIOR.ipynb`](NBA_Shot_Quality_Year_to_Year_Validation_NO_PRIOR.ipynb) | in notebook |
+| Feature importance | Model B, *Appendix: Feature importances* | in notebook |
+| Feature-tier ablation, incl. location-only baseline | Model B, *Ablation Study: Feature Tier Contribution* | in notebook |
+| Calibration curve and confusion matrix | Model B, *Appendix: Calibration curve (test set)* | in notebook |
+| Player SPOE distributions and leaders | Model B, *11.5) Player Performance vs Expected* and *11.6) Key Visualizations* | in notebook |
+| SPOE uncertainty and skill vs. luck (reliability, year-over-year r) | [`spoe_analysis.py`](spoe_analysis.py) | [`spoe_analysis/summary.md`](spoe_analysis/summary.md) |
+| Team expected wins, team table, expected-vs-actual scatter | Model B, sections *8)* through *11)* | `season_standings_no_prior.csv` |
+| "+ shooter identity" ablation (AUC 0.667) | Model A | `model_results.csv` |
+| Open shots vs. wins | [`Open_Shots_vs_Wins_Analysis.ipynb`](Open_Shots_vs_Wins_Analysis.ipynb) | in notebook |
+| Exploratory figures (shot charts, eFG% maps) | [`NBA_Shot_Data_Exploration_2024_25_FULL.ipynb`](NBA_Shot_Data_Exploration_2024_25_FULL.ipynb) | in notebook |
 
-| Fold | Train Years | Test Year | AUC |
-|------|-------------|-----------|-----|
-| 1 | 2014-2016 | 2017 | ~0.66 |
-| 2 | 2014-2017 | 2018 | ~0.66 |
-| ... | ... | ... | ... |
-| 8 | 2014-2023 | 2024 | ~0.67 |
-
-**Mean AUC**: 0.662 ± 0.007
-
-### Year-to-Year (Train: N, Test: N+1)
-
-Single-season training to test year-over-year stability.
-
-| Fold | Train | Test | AUC |
-|------|-------|------|-----|
-| 1 | 2020 | 2021 | ~0.65 |
-| 2 | 2021 | 2022 | ~0.65 |
-| ... | ... | ... | ... |
-| 5 | 2024 | 2025 | ~0.65 |
-
-**Mean AUC**: ~0.65
+Model B trains on an 80/20 split of the 2024–25 season (`RANDOM_STATE = 42`, stratified). The fitted models are cached in `models/fitted_models_no_prior.pkl`, so re-running the notebook reloads them instead of retraining.
 
 ---
 
-## Open Shots vs Wins Analysis
+## Getting the data
 
-Comparison of estimated open shots (from our model's `contest_label`) vs actual open shots (from NBA.com closest defender data, 4+ feet) against 2024-25 season wins.
+### Enriched shot data and cached models (Git LFS)
 
-**NBA.com data**: Combined 4-6 ft (Open) + 6+ ft (Wide Open) closest defender distance.
+`enriched_data/*.csv` (about 0.7 GB) and `models/*.pkl` (about 1.2 GB) are stored with [Git LFS](https://git-lfs.com). Install Git LFS **before** cloning, or you will get small pointer files instead of data:
 
-See `Open_Shots_vs_Wins_Analysis.ipynb` for charts and correlation analysis.
-
----
-
-## Notebooks
-
-### Primary Workflows
-
-| Notebook | Description |
-|----------|-------------|
-| **[NBA_Shot_Quality_Modeling_XGB_CatBoost.ipynb](NBA_Shot_Quality_Modeling_XGB_CatBoost.ipynb)** | Main modeling pipeline. Trains 12 ML models with Bayesian optimization, scores all shots with make probability, computes expected points, and generates Pythagorean win projections. |
-| **[enrich_shots_nbastatsv3_full.ipynb](enrich_shots_nbastatsv3_full.ipynb)** | Data enrichment pipeline. Takes raw play-by-play data and adds approximate shot clock (reconstructed from possession resets) and contest classification (open/borderline/contested heuristic). |
-| **[NBA_Shot_Data_Exploration_2024_25_FULL.ipynb](NBA_Shot_Data_Exploration_2024_25_FULL.ipynb)** | Comprehensive visualization suite. Generates 12 charts including court shot charts, hexbin eFG% maps, FG% heatmaps by distance × shot clock, team shot profiles, and player efficiency analysis. |
-
-### Validation
-
-| Notebook | Description |
-|----------|-------------|
-| **[NBA_Shot_Quality_Rolling_Temporal_Validation.ipynb](NBA_Shot_Quality_Rolling_Temporal_Validation.ipynb)** | Rolling temporal validation. Trains on expanding windows of prior seasons (e.g., 2014-2018 → test 2019) across 8 folds to evaluate model generalization over time. |
-| **[NBA_Shot_Quality_Year_to_Year_Validation.ipynb](NBA_Shot_Quality_Year_to_Year_Validation.ipynb)** | Year-to-year validation. Trains on a single season and tests on the next (e.g., 2023 → 2024) across 5 folds to measure year-over-year stability. |
-| **[NBA_Shot_Quality_Temporal_Validation_2023_2024.ipynb](NBA_Shot_Quality_Temporal_Validation_2023_2024.ipynb)** | Focused temporal validation. Trains on 2023 season and tests on 2024 to measure true out-of-sample generalization. |
-
-### Analysis
-
-| Notebook | Description |
-|----------|-------------|
-| **[Open_Shots_vs_Wins_Analysis.ipynb](Open_Shots_vs_Wins_Analysis.ipynb)** | Open shots vs wins analysis. Compares estimated open shots (from our model's `contest_label`) and actual open shots (NBA.com closest defender 4+ ft) against 2024-25 wins. |
-| **[compare_distance_vs_proxy_2014_story_thresh.ipynb](compare_distance_vs_proxy_2014_story_thresh.ipynb)** | Model comparison. Compares shot-make prediction using true defender distance versus enriched proxy features (shot clock, contest score) with threshold sweep analysis. |
-
-### Legacy / Experimental
-
-| Notebook | Description |
-|----------|-------------|
-| **[NBA_Shot_Data_Exploration.ipynb](NBA_Shot_Data_Exploration.ipynb)** | Initial data exploration. Shot distance distributions, shot charts, FG% leaders, heatmaps, and team profiles. |
-| **[NBA_Shot_Data_Exploration_Updated_2013-2014.ipynb](NBA_Shot_Data_Exploration_Updated_2013-2014.ipynb)** | Extended exploration for 2013-14 data. Adds team 3PA rate vs PPG, top scorers, and individual bad shot percentages. |
-| **[data-visualization.ipynb](data-visualization.ipynb)** | Early visualization notebook for 2015-16. Shot distributions, FG% by distance, and initial model comparisons. |
-| **[enrich_savant_shots_v2.ipynb](enrich_savant_shots_v2.ipynb)** | Legacy enrichment for NBA Savant data. Adds contest classification and derives shot values for 2013-14 seasons. |
-| **[nba_shot_quality_pipeline_old.ipynb](nba_shot_quality_pipeline_old.ipynb)** | Original pipeline. End-to-end Gradient Boosting model predicting shot makes and computing per-player "luck" (actual minus expected points). |
-| **[nba_personId_fullname_2013_2025.ipynb](nba_personId_fullname_2013_2025.ipynb)** | Utility notebook. Fetches and maps NBA player `personId` to full names across 2013-2025 seasons via `nba_api`. |
-| **[shot_clock_debug.ipynb](shot_clock_debug.ipynb)** | Debugging notebook. Investigates shot clock reconstruction accuracy and edge cases. |
-
-## Project Structure
-
-```
-nba-shot-quality/
-├── NBA_Shot_Quality_Modeling_XGB_CatBoost.ipynb       # Main modeling notebook
-├── NBA_Shot_Quality_Rolling_Temporal_Validation.ipynb  # Expanding window validation
-├── NBA_Shot_Quality_Year_to_Year_Validation.ipynb      # Year-over-year validation
-├── NBA_Shot_Data_Exploration_2024_25_FULL.ipynb        # Visualization suite
-├── Open_Shots_vs_Wins_Analysis.ipynb                   # Open shots vs wins charts
-├── enrich_shots_nbastatsv3_full.ipynb                  # Data enrichment pipeline
-├── raw_data/                                           # Raw NBA Stats API data
-│   └── nbastatsv3_YYYY.csv                            #   (12 seasons, 2013-2024)
-├── enriched_data/                                      # Processed shot data
-│   └── nbastatsv3_YYYY_enriched_shots.csv             #   (~219k shots per season)
-├── models/                                             # Cached trained models
-│   ├── fitted_models.pkl
-│   └── model_results.pkl
-├── player_historical_stats.csv                         # Player FG% by season
-├── team_defensive_stats.csv                            # Team defensive ratings
-├── model_results.csv                                   # Model comparison results
-├── season_standings.csv                                # Pythagorean expected wins
-└── team_game_points.csv                                # Per-game expected points
-```
-
----
-
-## Quick Start
-
-### 1. Install Dependencies
 ```bash
-python -m venv .venv
+git lfs install
+git clone https://github.com/bnamm1/nba-shot-quality.git
+```
+
+To download only what Model B needs (the 2024–25 shots):
+
+```bash
+GIT_LFS_SKIP_SMUDGE=1 git clone https://github.com/bnamm1/nba-shot-quality.git
+cd nba-shot-quality
+git lfs pull --include="enriched_data/nbastatsv3_2024_enriched_shots.csv"
+```
+
+`enriched_data/` is the exact input used in the paper (produced by `enrich_shots.py`).
+
+### Raw play-by-play (not stored in this repo)
+
+Raw season files come from [shufinskiy/nba_data](https://github.com/shufinskiy/nba_data) (NBA Stats API v3 play-by-play). They are needed to:
+
+- regenerate `enriched_data/` with `enrich_shots.py`;
+- compute actual win totals in Model B, section *8)*, which reads `raw_data/nbastatsv3_2024.csv`.
+
+```bash
+mkdir -p raw_data
+for y in $(seq 2013 2024); do
+  curl -L -o raw_data/nbastatsv3_$y.tar.xz \
+    https://github.com/shufinskiy/nba_data/raw/main/datasets/nbastatsv3_$y.tar.xz
+  tar -xJf raw_data/nbastatsv3_$y.tar.xz -C raw_data && rm raw_data/nbastatsv3_$y.tar.xz
+done
+```
+
+Seasons are named by their starting year (`2024` = 2024–25). The raw files total about 7.05 million events; filtering to field-goal attempts leaves about 2.51 million shots (about 219k per season).
+
+`player_historical_stats.csv` and `team_defensive_stats.csv` (prior-season lookups) are included in the repo.
+
+---
+
+## Quick start
+
+```bash
+python3.12 -m venv .venv
 source .venv/bin/activate
-pip install pandas numpy scikit-learn xgboost catboost lightgbm matplotlib jupyter optuna
+pip install pandas numpy scikit-learn lightgbm xgboost catboost optuna matplotlib jupyter requests
+
+# Paper model (Model B)
+jupyter notebook NBA_Shot_Quality_Modeling_XGB_CatBoost_NO_PRIOR.ipynb
+
+# Supporting analyses
+python spoe_analysis.py                    # skill vs. luck -> spoe_analysis/ (needs all 12 enriched seasons)
+python validate_shot_clock.py --seasons 2024   # shot-clock check -> shot_clock_validation/
+
+# Regenerate enriched data from raw play-by-play (optional; needs raw_data/)
+python enrich_shots.py --seasons 2024 --out-dir enriched_data
 ```
 
-### 2. Run the Pipeline
+---
 
-**Enrich raw data:**
-```bash
-jupyter notebook enrich_shots_nbastatsv3_full.ipynb
-```
+## Features (Model B)
 
-**Train models:**
-```bash
-jupyter notebook NBA_Shot_Quality_Modeling_XGB_CatBoost.ipynb
-```
+Model B uses 63 numeric and 7 categorical inputs, all derived from play-by-play data and prior-season team defense.
 
-### 3. Temporal Validation
-- `NBA_Shot_Quality_Rolling_Temporal_Validation.ipynb` — Rolling window validation
-- `NBA_Shot_Quality_Year_to_Year_Validation.ipynb` — Year-over-year generalization
+| Group | Features |
+|---|---|
+| Location and distance | `shotDistance`, `xLegacy`, `yLegacy`, `shot_angle_rad`, `shot_distance_log`, `shot_distance_sq`, `shotValue`, `is_paint`, `is_midrange`, `is_corner3`, `is_above_break3` |
+| Game time | `period`, `ABS_TIME`, `period_sec_remaining`, `period_sec_elapsed`, `game_sec_remaining_reg` |
+| Shot clock (reconstructed) | `SHOT_CLOCK_APPROX`, `is_early_clock`, `is_late_clock`, `is_heave` |
+| Shot type (parsed from the play description) | 22 indicators, e.g. `is_dunk`, `is_layup`, `is_pullup`, `is_stepback`, `is_fadeaway`, `is_driving`, `is_floating`, `is_tip`, `is_putback`, `is_second_chance` |
+| Contest proxy | `contest_score`, `contest_x_distance`, `contest_x_shot_clock` |
+| Clock × location interactions | 13 features, e.g. `clock_x_distance`, `is_transition_paint`, `is_late_clock_midrange`, `is_desperation_3pt`, `is_rhythm_shot` |
+| Prior-season opponent defense | `opp_def_fg_pct`, `opp_def_rim_pct`, `opp_def_3pt_pct`, `opp_def_mid_pct`, `opp_def_shot_type_pct` |
+| Categorical | `subType`, `contest_label`, `location`, `distance_bucket`, `shot_clock_bucket`, `shot_side`, `shot_zone_simple` |
+
+**Excluded on purpose:**
+- the shooter's prior-season stats (`prior_fg_pct`, `prior_fg3_pct`, `prior_fg2_pct`, `prior_attempts`, `prior_shot_type_pct`);
+- team identity (`teamTricode`).
+
+Prior-season opponent defense is kept because it describes the shot's difficulty, not who is shooting. All prior-season values come from seasons before the training period, so nothing leaks from the future.
+
+By total gain, the most important features are shot location (angle and court coordinates), game time and prior-season opponent defense.
 
 ---
 
-## Technical Details
+## Models
 
-### Approximate Shot Clock (`SHOT_CLOCK_APPROX`)
+Twelve classifiers plus a soft-voting ensemble. Cross-validation is 3-fold stratified, reported as mean ± SD.
 
-The official NBA public dataset doesn't include the actual shot clock value. We **approximate** it by reconstructing possessions from play-by-play events:
+| Group | Models |
+|---|---|
+| Optuna-tuned (Bayesian, TPE sampler, 10 trials, 3-fold CV on ROC AUC) | LightGBM, XGBoost, CatBoost, Gradient Boosting, HistGradientBoosting |
+| Fixed hyperparameters | Logistic Regression, k-Nearest Neighbors, Random Forest, Extra Trees, AdaBoost, MLP, Gaussian Naive Bayes |
+| Ensemble | Soft voting over the five tuned boosters |
 
-1. **Reset events (new shot clock):**
-   * **Made field goal** → opposing team inbounds, new 24s
-   * **Turnover** → opposing team gains possession, new 24s
-   * **Defensive rebound** → new 24s
-   * **Offensive rebound** → 14s reset (since 2018-19 rules)
-   * **Defensive violations** (kicked ball, defensive 3-second) → 14s reset
+LightGBM is the scoring model for every downstream analysis. The tuned parameters for each model are in `model_results_no_prior.csv` (`best_params` column), and the fixed settings are in the Model B notebook, *4) Models to try*.
 
-2. **Elapsed time since reset:**
-   * Convert `clock` field (`PT11M43.00S`) into absolute game seconds
-   * For each shot, find the last reset event and compute time difference
-
-3. **Shot clock approximation:**
-   * `SHOT_CLOCK_APPROX = reset_value - time_since_reset`
-   * Example: Reset at 8:00, shot at 7:50 → `24 - 10 = 14`
-
-**Limitations:**
-- Doesn't model "minimum 14" exactly (keeps 18 when >14 remains)
-- Doesn't track inbound delays
-- Still effective for distinguishing early-clock (20+) vs late-clock (<=5) shots
+Other settings: `PYTH_EXP = 14` (Pythagorean exponent), `RANDOM_STATE = 42`.
 
 ---
 
-### Contested/Open Heuristic (`contest_score`, `contest_label`)
+## Technical details
 
-Since defender distance isn't in this dataset, we estimate shot difficulty using:
+### Approximate shot clock (`SHOT_CLOCK_APPROX`)
 
-1. **Action Type / SubType / Description**
-   * **Contested-like** (+2): Pull-Up, Step Back, Fadeaway, Driving Layup, Hook, Dunk
-   * **Open-like** (-1): Catch-and-Shoot, Spot Up, Generic Jump Shot
+Public play-by-play has no shot clock, so it is reconstructed from possession events (`enrich_shots.py`, `compute_shot_clock_v5`):
 
-2. **Shot Location / Distance**
-   * **At-rim (<=5 ft)** (+1) → usually more defended
-   * **Mid-range (8-16 ft)** (+1) → often tightly contested
-   * **Deep 3s (>=27 ft)** (-1) → more likely open
+1. **Resets to 24 s:** made field goal, turnover, defensive rebound.
+2. **Resets to 14 s:** offensive rebound and certain defensive violations. This rule is applied only from 2018–19 on, when the rule took effect. Earlier seasons reset to 24.
+3. **Shot clock** = reset value − seconds elapsed since the last reset (from the `clock` field).
 
-3. **Corner vs Above-the-Break**
-   * Corner-3: `|xLegacy| >= 220` and `yLegacy <= 50`
-   * Corner catch-and-shoot nudged more open (-1)
+Validated against NBA.com's tracking dashboard, which reports attempts per shot-clock range: agreement bound 83.8–86.4% across all twelve seasons ([details](shot_clock_validation/summary_all_seasons.md)). About 2.9% of attempts have no reconstructable shot clock and are median-imputed at model time.
 
-4. **Shot Clock Context**
-   * `SHOT_CLOCK_APPROX <= 5` (+1): Late-clock = rushed/contested
+Known limitations:
+- No inbound delay is modeled, so the 24–22 s range is under-populated.
+- The "minimum 14" rule after offensive rebounds is approximated.
 
-5. **Labels:**
-   * `>= 2` → **likely_contested**
-   * `= 1` → **borderline**
-   * `<= 0` → **likely_open**
+### Contest heuristic (`contest_score`, `contest_label`)
 
----
+Defender distance is not public after 2015–16, so shot difficulty is estimated from the following:
 
-### Court Coordinates (xLegacy / yLegacy)
+- **Action type:**
+  - +2 for pull-up, step-back, fadeaway, driving layup, hook, dunk.
+  - −1 for catch-and-shoot, spot-up, generic jump shot.
+- **Location:**
+  - +1 at the rim (≤5 ft) and in the mid-range (8–16 ft).
+  - −1 for deep threes (≥27 ft) and corner catch-and-shoot.
+- **Late clock:** +1 when `SHOT_CLOCK_APPROX ≤ 5`.
 
-NBA shot coordinates in **tenths of feet**:
-- **xLegacy**: -250 to +250 (sideline to sideline)
-- **yLegacy**: 0 to 470 (baseline to half-court)
-- **Basket**: (0, 0)
+Labels: `≥ 2` = likely_contested, `1` = borderline, `≤ 0` = likely_open.
 
-**Zones:**
-- **Paint**: ~0-8 ft from basket
-- **Mid-range**: 8-22 ft
-- **Corner-3**: `|x| >= 220` and `y <= 50`
-- **Above-the-break 3**: All other 3PT shots
+### Court coordinates
+
+`xLegacy` (−250 to +250) and `yLegacy` (0 to 470) are in tenths of feet, with the basket at (0, 0). Corner three: `|x| ≥ 220` and `y ≤ 50`.
 
 ---
 
-## Output Files
+## Other notebooks and scripts
 
-| File | Description |
-|------|-------------|
-| `model_results.csv` | Cross-validation (mean ± std) and test metrics for all models |
-| `team_game_points.csv` | Per-game actual vs expected points by team |
-| `season_standings.csv` | Pythagorean expected wins vs actual wins |
-| `player_historical_stats.csv` | Player FG%, 3P%, attempts by season |
-| `team_defensive_stats.csv` | Opponent FG% allowed by zone and season |
+| File | Purpose |
+|---|---|
+| [`NBA_Shot_Quality_Rolling_Temporal_Validation.ipynb`](NBA_Shot_Quality_Rolling_Temporal_Validation.ipynb), [`rerun_rolling_validation.py`](rerun_rolling_validation.py) | Expanding-window validation (train on all prior seasons, test on the next) |
+| [`NBA_Shot_Quality_Year_to_Year_Validation.ipynb`](NBA_Shot_Quality_Year_to_Year_Validation.ipynb), [`..._NO_PRIOR_KEEP_TEAM.ipynb`](NBA_Shot_Quality_Year_to_Year_Validation_NO_PRIOR_KEEP_TEAM.ipynb) | Year-to-year validation for Models A and C |
+| [`NBA_Shot_Quality_Temporal_Validation_2023_2024.ipynb`](NBA_Shot_Quality_Temporal_Validation_2023_2024.ipynb) | Train on 2023–24, test on 2024–25 |
+| [`compare_distance_vs_proxy_2014_story_thresh.ipynb`](compare_distance_vs_proxy_2014_story_thresh.ipynb) | True defender distance vs. public proxies (2014, when tracking data was public) |
+| [`feature_ablation_test.py`](feature_ablation_test.py) | Earlier feature-ablation experiments |
+| [`enrich_shots_nbastatsv3_full.ipynb`](enrich_shots_nbastatsv3_full.ipynb) | Original enrichment notebook (superseded by `enrich_shots.py`) |
+| [`nba_personId_fullname_2013_2025.ipynb`](nba_personId_fullname_2013_2025.ipynb) | Maps `personId` to player names via `nba_api` |
+| `NBA_Shot_Data_Exploration*.ipynb`, `data-visualization.ipynb`, `enrich_savant_shots_v2.ipynb`, `nba_shot_quality_pipeline_old.ipynb`, `shot_clock_debug.ipynb` | Early exploration and legacy pipelines |
 
 ---
 
 ## License
 
-This project is for research and educational purposes.
+[Apache License 2.0](LICENSE).
 
 ## Acknowledgments
 
-- [shufinskiy/nba_data](https://github.com/shufinskiy/nba_data) for NBA Stats API play-by-play data
-- NBA Stats API for closest defender distance data
-- Pythagorean winning formula (exponent 14) for expected wins calculation
+- [shufinskiy/nba_data](https://github.com/shufinskiy/nba_data) for NBA Stats API play-by-play data.
+- NBA.com tracking dashboards for shot-clock and closest-defender validation data.
